@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -272,7 +273,9 @@ class RaggedTensor:
         return RaggedTensor(values, offsets)
 
     @staticmethod
-    def from_dense(dense: torch.Tensor):
+    def from_dense(
+        dense: torch.Tensor, check_invalid: bool = False, invalid_value: int = 0
+    ):
         """Create RaggedTensor from dense tensor.
 
         Automatically detects padding (zero values) and creates an efficient
@@ -290,7 +293,10 @@ class RaggedTensor:
             >>> ragged = RaggedTensor.from_dense(dense)
             >>> print(ragged.values())  # [1, 2, 3, 4, 5, 6]
         """
-        values, offsets = torch.ops.recis.dense_to_ragged(dense)
+        invalid_tensor = torch.tensor([invalid_value], dtype=dense.dtype)
+        values, offsets = torch.ops.recis.dense_to_ragged(
+            dense, check_invalid, invalid_tensor
+        )
         return RaggedTensor(values, offsets, dense_shape=dense.shape)
 
     def to_sparse(self):
@@ -539,3 +545,60 @@ class RaggedTensor:
             f")"
         )
         return s
+
+    def __repr__(self) -> str:
+        """Return detailed string representation of the ragged tensor.
+
+        This method is called when the object is displayed in containers
+        like lists, dictionaries, or when using repr().
+
+        Returns:
+            str: Detailed string representation showing all tensor properties.
+
+        Example:
+            >>> data = {"a": RaggedTensor(values, offsets)}
+            >>> print(data)  # Will show detailed RaggedTensor content
+        """
+        return self.__str__()
+
+    def __deepcopy__(self, memo):
+        """Create a deep copy of the ragged tensor.
+
+        This method enables compatibility with Python's copy.deepcopy() function.
+        All tensor data and metadata are deeply copied.
+
+        Args:
+            memo (dict): Memo dictionary used by copy.deepcopy() to avoid
+                infinite recursion and optimize copying of shared objects.
+
+        Returns:
+            RaggedTensor: Deep copy of the ragged tensor with all data copied.
+
+        Example:
+            >>> import copy
+            >>> original = RaggedTensor(values, offsets)
+            >>> deep_copied = copy.deepcopy(original)
+            >>> # Modifying deep_copied won't affect original
+            >>> deep_copied._values[0] = 999
+            >>> print(original._values[0])  # Original value unchanged
+        """
+        # Deep copy all tensor data
+        new_values = self._values.clone()
+        new_offsets = [offset.clone() for offset in self._offsets]
+        new_weight = self._weight.clone() if self._weight is not None else None
+
+        # Deep copy pad_info if it exists
+        new_pad_info = None
+        if self._pad_info is not None:
+            new_pad_info = copy.deepcopy(self._pad_info, memo)
+
+        # Create new RaggedTensor with deep copied data
+        new_ragged = RaggedTensor(
+            values=new_values,
+            offsets=new_offsets,
+            weight=new_weight,
+            dense_shape=self._dense_shape,  # tuple is immutable, safe to share
+        )
+        new_ragged._pad_info = new_pad_info
+
+        return new_ragged

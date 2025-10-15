@@ -2,6 +2,8 @@ import unittest
 
 import torch
 
+from recis.nn.functional.ragged_ops import dense_to_ragged
+
 
 def get_invaild_data(device="cpu", dtype=torch.float32):
     data = (
@@ -25,13 +27,8 @@ def get_data(device="cpu", dtype=torch.float32):
     return data, values, offsets
 
 
-def dense_to_ragged(data, check_invalid, invalid_value):
-    invalid_tensor = torch.Tensor([invalid_value]).to(dtype=data.dtype)
-    return torch.ops.recis.dense_to_ragged(data, check_invalid, invalid_tensor)
-
-
-class TestRaggedToDense(unittest.TestCase):
-    def test_ragged_to_dense_check_invalid(self):
+class TestDenseToRagged(unittest.TestCase):
+    def test_dense_to_ragged_check_invalid(self):
         check_invalid = True
         invalid_value = 0
         for data_invalid in [True, False]:
@@ -53,7 +50,7 @@ class TestRaggedToDense(unittest.TestCase):
                         self.assertTrue(torch.equal(values, values_ret))
                         self.assertTrue(torch.equal(offsets, offsets_ret))
 
-    def test_ragged_to_dense_no_check_invalid(self):
+    def test_dense_to_ragged_no_check_invalid(self):
         check_invalid = False
         invalid_value = 0
         for device in ["cpu"]:
@@ -61,7 +58,7 @@ class TestRaggedToDense(unittest.TestCase):
                 with self.subTest(
                     device=device, dtype=dtype, check_invalid=check_invalid
                 ):
-                    print(device, dtype, "test_ragged_to_dense")
+                    print(device, dtype, "test_dense_to_ragged")
                     data, _, _ = get_data(device, dtype)
                     values_ret, offsets_ret = dense_to_ragged(
                         data, check_invalid, invalid_value

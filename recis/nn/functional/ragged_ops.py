@@ -8,7 +8,9 @@ from recis.utils.logger import Logger
 logger = Logger(__name__)
 
 
-def dense_to_ragged(tensor: torch.Tensor):
+def dense_to_ragged(
+    tensor: torch.Tensor, check_invalid: bool = False, invalid_value: int = 0
+):
     """Convert dense tensor to ragged tensor format.
 
     This function converts a dense tensor to ragged format by removing
@@ -19,6 +21,8 @@ def dense_to_ragged(tensor: torch.Tensor):
     Args:
         tensor (torch.Tensor): Input dense tensor to be converted to ragged format.
             Typically contains padded sequences where trailing zeros represent padding.
+        check_invalid (bool, optional): Whether to check if the tensor contains invalid values. Defaults to False.
+        invalid_value (int, optional): The value to treat as invalid. Defaults to 0.
 
     Returns:
         Tuple[torch.Tensor, List[torch.Tensor]]: A tuple containing:
@@ -46,7 +50,8 @@ def dense_to_ragged(tensor: torch.Tensor):
         - Resulting ragged tensor uses less memory for sparse data
         - Offset arrays enable reconstruction of original sequence boundaries
     """
-    return torch.ops.recis.dense_to_ragged(tensor)
+    invalid_tensor = torch.tensor([invalid_value], dtype=tensor.dtype)
+    return torch.ops.recis.dense_to_ragged(tensor, check_invalid, invalid_tensor)
 
 
 def ragged_to_sparse(values, row_splits: List[torch.Tensor]):
