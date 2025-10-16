@@ -93,10 +93,23 @@ std::string DataJsonNameTmp(int64_t shard_index, int64_t thread_idx) {
   return buffer.c_str();
 }
 
-std::string IndexJsonNameTmp(const std::string &path, int64_t shard_index,
-                             int64_t thread_idx) {
+std::string DataJsonName(int64_t shard_index, int64_t thread_idx) {
   std::string buffer(100, ' ');
-  const char *fmt = "ckpt-%07lld-%07lld.json.tmp";
+  const char *fmt = "ckpt-%07lld-%07lld.json";
+  auto ret =
+      std::snprintf(&buffer[0], buffer.size(), fmt, shard_index, thread_idx);
+  while (static_cast<size_t>(ret) >= buffer.size()) {
+    buffer.resize(buffer.size() * 2);
+    ret =
+        std::snprintf(&buffer[0], buffer.size(), fmt, shard_index, thread_idx);
+  }
+  return buffer.c_str();
+}
+
+std::string IndexJsonName(const std::string &path, int64_t shard_index,
+                          int64_t thread_idx) {
+  std::string buffer(100, ' ');
+  const char *fmt = "ckpt-%07lld-%07lld.json";
   auto ret =
       std::snprintf(&buffer[0], buffer.size(), fmt, shard_index, thread_idx);
   while (static_cast<size_t>(ret) >= buffer.size()) {

@@ -69,12 +69,14 @@ at::intrusive_ptr<SaveBundle> SaveBundle::Make(const std::string &path,
   ret->table_index_ = 0;
   ret->table_writers_.resize(parallel);
   ret->table_file_names_.resize(parallel);
+  ret->table_json_names_.resize(parallel);
   ret->index_info_ = IndexInfo::Make();
   for (int i : c10::irange(parallel)) {
     ret->table_writers_[i] = TableWriter::Make(
         path, DataFileNameTmp(shard_index, i), DataJsonNameTmp(shard_index, i));
     ret->table_file_names_[i] =
         DataFileName(shard_index * parallel + i, parallel * shard_num);
+    ret->table_json_names_[i] = DataJsonName(shard_index, i);
   }
   ret->InitTypeMap();
   return ret;
@@ -224,6 +226,9 @@ void SaveBundle::SaveTables() {
     Env::Default()->TransactionRenameFile(
         io::JoinPath(path_, table_writers_[i]->FileName()),
         io::JoinPath(path_, table_file_names_[i]));
+    Env::Default()->TransactionRenameFile(
+        io::JoinPath(path_, table_writers_[i]->JsonName()),
+        io::JoinPath(path_, table_json_names_[i]));
   }
 }
 
@@ -291,11 +296,10 @@ void SaveBundle::MergeTorchRankJson() {
 
   for (int i = 0; i < shard_num_; i++) {
     for (int j = 0; j < parallel_; j++) {
-      auto tmp_json_file = IndexJsonNameTmp(path_, i, j);
+      auto tmp_json_file = IndexJsonName(path_, i, j);
       sub_json_files.push_back(tmp_json_file);
     }
   }
-
   nlohmann::json combine_data;
   nlohmann::json sub_data;
 

@@ -57,6 +57,8 @@ void TableWriter::SequentialWrite() {
 
 const std::string &TableWriter::FileName() const { return basename_; }
 
+const std::string &TableWriter::JsonName() const { return jsonname_; }
+
 void TableWriter::SaveMeta() {
   nlohmann::ordered_json meta;
   for (auto block : write_blocks_) {

@@ -22,11 +22,12 @@ std::string FullTensorKeyJsonFileNameTmp(const std::string &path,
                                          int64_t shard_idx);
 std::string IndexFileName(const std::string &path, int64_t shard_index);
 std::string IndexFileNameTmp(const std::string &path, int64_t shard_index);
-std::string IndexJsonNameTmp(const std::string &path, int64_t shard_index,
-                             int64_t thread_idx);
+std::string IndexJsonName(const std::string &path, int64_t shard_index,
+                          int64_t thread_idx);
 std::string DataFileName(int64_t shard_index, int64_t thread_idx);
 std::string DataFileNameTmp(int64_t shard_index, int64_t thread_idx);
 std::string DataJsonNameTmp(int64_t shard_index, int64_t thread_idx);
+std::string DataJsonName(int64_t shard_index, int64_t thread_idx);
 
 std::string HTIdSlotName();
 bool IsIdName(const std::string &);

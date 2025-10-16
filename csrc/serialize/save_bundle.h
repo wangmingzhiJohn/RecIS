@@ -39,6 +39,7 @@ class SaveBundle : public at::intrusive_ptr_target {
   at::intrusive_ptr<IndexInfo> index_info_;
   std::vector<at::intrusive_ptr<TableWriter>> table_writers_;
   std::vector<std::string> table_file_names_;
+  std::vector<std::string> table_json_names_;
   std::unordered_map<std::string, std::string> tensor_name_map_;
   std::unordered_map<std::string, std::string> type_map_;
 };

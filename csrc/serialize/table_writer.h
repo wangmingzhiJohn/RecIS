@@ -18,6 +18,7 @@ class TableWriter : public at::intrusive_ptr_target {
   void AppendWriteBlock(torch::intrusive_ptr<WriteBlock> write_block);
   void SequentialWrite();
   const std::string &FileName() const;
+  const std::string &JsonName() const;
   bool Empty() const;
   TableWriter(const std::string &dir_name, const std::string &base_name,
               const std::string &json_name);
