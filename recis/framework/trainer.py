@@ -401,7 +401,7 @@ class Trainer:
         metrics.update(epoch=epoch)
         metrics.update(loss=loss)
         metrics.update(get_global_metrics())
-        loss.backward()
+        self.accelerator.backward(loss)
         self.dense_optimizer.step()
         if self.sparse_optimizer is not None:
             self.sparse_optimizer.step()
