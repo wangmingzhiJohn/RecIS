@@ -48,6 +48,7 @@ class TrainingArguments:
         max_to_keep (int): Maximum number of checkpoints to keep. Defaults to 5.
         save_concurrency_per_rank (int): Number of concurrent save operations per rank.
                                         Defaults to 4.
+        save_every_n_windows (int): Number of io windows to save checkpoints. Defaults to 1.
     """
 
     gradient_accumulation_steps: int = 1
@@ -60,6 +61,7 @@ class TrainingArguments:
     save_steps: Optional[int] = 1000
     max_to_keep: int = 5
     save_concurrency_per_rank: int = 4
+    save_every_n_windows: int = 1
 
 
 class Trainer:
@@ -193,21 +195,26 @@ class Trainer:
 
     def build_checkpoint_manager(self, model, args):
         saver = self.build_saver(model, args)
-        self.checkpoint_manager = CheckpointManager(
-            saver=saver, save_interval=args.save_steps
-        )
+        save_every_n_windows = None
         if self.train_dataset is not None:
             saver.register_io_state("train_io", self.train_dataset)
             if hasattr(self.train_dataset, "_window_paths"):
                 saver.register_for_checkpointing("train_window_io", self.train_dataset)
+                save_every_n_windows = args.save_every_n_windows
         if self.eval_dataset is not None and hasattr(
             self.eval_dataset, "_window_paths"
         ):
             saver.register_io_state("eval_io", self.eval_dataset)
-            if hasattr(self.eval_dataset, "_window_paths"):
-                saver.register_for_checkpointing("eval_window_io", self.eval_dataset)
+            saver.register_for_checkpointing("eval_window_io", self.eval_dataset)
+            save_every_n_windows = args.save_every_n_windows
         if self.dense_optimizer is not None:
             saver.register_for_checkpointing("dense_optimizer", self.dense_optimizer)
+
+        self.checkpoint_manager = CheckpointManager(
+            saver=saver,
+            save_interval=args.save_steps,
+            save_every_n_windows=save_every_n_windows,
+        )
 
     def build_saver(self, model, args):
         saver = Saver(
@@ -256,12 +263,12 @@ class Trainer:
         """
         self.restore()
         for epoch in range(self.args.train_epoch):
-            if hasattr(self.train_dataset, "_window_paths"):
-                self.train_dataset.reset()
             self._train_loop(
                 self.args.train_steps if train_steps is None else train_steps,
                 epoch=epoch,
             )
+            if hasattr(self.train_dataset, "_window_paths"):
+                self.train_dataset.reset()
         for hook in self.hooks:
             hook.end()
 
@@ -371,6 +378,8 @@ class Trainer:
                 stop_flag = self.sync_exit_flag(stop_flag)
                 # if stop_flag is True, try to get the next window
                 if stop_flag:
+                    # for window io, save checkpoint after the current window
+                    self.checkpoint_manager.window_step()
                     iterator = self.get_new_window_iter(self.train_dataset)
                     # if iterator is None, break
                     if iterator is None:

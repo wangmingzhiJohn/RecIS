@@ -702,6 +702,13 @@ def make_lake_stream_window_io(step_mins=60, repeat_mins=None):
         _shard_sheets = []
         _epochs = 1
         _name = "test"
+        _loaded = False
+
+        def __init__(self, *args, **kwargs):
+            # for window io, save_interval should be None,
+            # because read offset is saved after each window.
+            kwargs["save_interval"] = None
+            super().__init__(*args, **kwargs)
 
         def add_path(self, lake_path, start_time, interval_mins):
             self.add_paths([(lake_path, start_time, interval_mins)])
@@ -729,7 +736,8 @@ def make_lake_stream_window_io(step_mins=60, repeat_mins=None):
         def _shard_window_data(self):
             logger.info("shard window data")
             start_ts = self._begins[0]
-            self._read_offset[0] = start_ts
+            if not self._loaded:
+                self._read_offset[0] = start_ts
             self._interval = self._ends[0] - start_ts
             if self._interval < 0:
                 raise ValueError("interval should be greater than 0")
@@ -765,6 +773,11 @@ def make_lake_stream_window_io(step_mins=60, repeat_mins=None):
               state_dict: the state dict to load.
             """
             self._read_offset = state_dict["read_offset"]
+            self._loaded = True
+
+        def reset(self):
+            self._window_paths = []
+            self._loaded = False
 
         def next_window(self):
             """Move the window forward.

@@ -443,18 +443,24 @@ class CheckpointManager:
         >>> # Automatic save will occur every save_interval steps
     """
 
-    def __init__(self, saver: Saver, save_interval: int) -> None:
+    def __init__(
+        self, saver: Saver, save_interval: int, save_every_n_windows: Optional[int] = None
+    ) -> None:
         """Initialize the checkpoint manager.
 
         Args:
             saver (Saver): The saver instance to use for checkpoint operations.
             save_interval (int): Number of steps between automatic saves.
+            save_every_n_windows (int): Number of windows to save when using window io.
+                If this is set, save_interval will be ignored.
         """
         self._saver = saver
         self._global_step = torch.scalar_tensor(0, dtype=torch.int64)
         self._rank = int(os.environ.get("RANK", 0))
         self._shard_num = int(os.environ.get("WORLD_SIZE", 1))
         self._save_interval = save_interval
+        self._save_every_n_windows = save_every_n_windows
+        self._window_step_counter = 0
         if not self._saver.get_extra_data("global_step"):
             self._saver.register_for_checkpointing("global_step", self._global_step)
 
@@ -472,7 +478,17 @@ class CheckpointManager:
         saves a checkpoint when the step count reaches the save interval.
         """
         self._global_step += 1
-        if self._global_step % self._save_interval == 0:
+        if (
+            self._save_every_n_windows is None
+            and self._global_step % self._save_interval == 0
+        ):
+            ckpt_id = f"ckpt_{self._global_step}"
+            self._saver.save(ckpt_id, self._rank, self._shard_num)
+
+    def window_step(self):
+        """Similar to step, but only for window io."""
+        self._window_step_counter += 1
+        if self._window_step_counter % self._save_every_n_windows == 0:
             ckpt_id = f"ckpt_{self._global_step}"
             self._saver.save(ckpt_id, self._rank, self._shard_num)
 
