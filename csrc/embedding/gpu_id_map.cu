@@ -11,9 +11,9 @@ GpuIdMap::GpuIdMap(torch::Device id_device) {
   id_allocator_ =
       at::make_intrusive<recis::embedding::IdAllocator>(id_device, 0);
   // TODO(yuhuan.zh) new cuco with torch stream && allocator
-  ids_map_.reset(new cuco::dynamic_map{MapCapacity, cuco::empty_key{EmptyKey},
-                                       cuco::empty_value{EmptyValue},
-                                       cuco::erased_key{ErasedKey}});
+  ids_map_.reset(new cuco::flat_hash_map{MapCapacity, cuco::empty_key{EmptyKey},
+                                         cuco::empty_value{EmptyValue},
+                                         cuco::erased_key{ErasedKey}});
 }
 
 torch::Tensor GpuIdMap::Lookup(const torch::Tensor &ids) {
@@ -23,9 +23,11 @@ torch::Tensor GpuIdMap::Lookup(const torch::Tensor &ids) {
   torch::Tensor not_find_mask =
       torch::empty_like(ids, torch::dtype(torch::kBool));
   // lookup in cuco map
-  ids_map_->find_value_and_mask(
+  ids_map_->find_and_mask(
       ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel(),
-      index.data_ptr<int64_t>(), not_find_mask.data_ptr<bool>(), stream);
+      index.data_ptr<int64_t>(), not_find_mask.data_ptr<bool>(),
+      cuco::default_hash_function<int64_t>{}, cuda::std::equal_to<int64_t>{},
+      stream);
   // generate index for not exist ids
   torch::Tensor mask_index = torch::cumsum(not_find_mask, 0);
   int64_t gen_num = mask_index[mask_index.numel() - 1].item<int64_t>();
@@ -36,11 +38,17 @@ torch::Tensor GpuIdMap::Lookup(const torch::Tensor &ids) {
   index = recis::functional::scatter_ids_with_mask_op(
       index, new_index, std::get<1>(new_ids_tuple));
   // insert ids and index not exist into cuco map
-  ids_map_->insert_key_value_unsafe(
-      std::get<0>(new_ids_tuple).data_ptr<int64_t>(),
-      std::get<0>(new_ids_tuple).data_ptr<int64_t>() + new_index.numel(),
-      new_index.data_ptr<int64_t>(), stream);
+  auto pairs = thrust::make_transform_iterator(
+      thrust::counting_iterator<std::size_t>{0},
+      cuda::proclaim_return_type<cuco::pair<int64_t, int64_t>>(
+          [new_ids = std::get<0>(new_ids_tuple).data_ptr<int64_t>(),
+           new_indices = new_index.data_ptr<int64_t>()] __device__(auto i) {
+            return cuco::pair<int64_t, int64_t>{new_ids[i], new_indices[i]};
+          }));
 
+  ids_map_->insert(pairs, pairs + gen_num,
+                   cuco::default_hash_function<int64_t>{},
+                   cuda::std::equal_to<int64_t>{}, stream);
   return index;
 }
 
@@ -51,9 +59,11 @@ torch::Tensor GpuIdMap::LookupReadOnly(const torch::Tensor &ids) {
   torch::Tensor not_find_mask =
       torch::empty_like(ids, torch::dtype(torch::kBool));
   // lookup in cuco map
-  ids_map_->find_value_and_mask(
+  ids_map_->find_and_mask(
       ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel(),
-      index.data_ptr<int64_t>(), not_find_mask.data_ptr<bool>(), stream);
+      index.data_ptr<int64_t>(), not_find_mask.data_ptr<bool>(),
+      cuco::default_hash_function<int64_t>{}, cuda::std::equal_to<int64_t>{},
+      stream);
   // generate index for not exist ids
   auto out_index = torch::where(not_find_mask, kNullIndex, index);
   return out_index;
@@ -67,8 +77,8 @@ torch::Tensor GpuIdMap::InsertIds(const torch::Tensor &ids) {
 std::pair<torch::Tensor, torch::Tensor> GpuIdMap::SnapShot() {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   int64_t act_size = id_allocator_->GetActiveSize();
-  TORCH_CHECK(ids_map_->get_size() == act_size, " ids_map_size != act_size",
-              ids_map_->get_size(), " vs ", act_size);
+  TORCH_CHECK(ids_map_->size() == act_size, " ids_map_size != act_size ",
+              ids_map_->size(), " vs ", act_size);
   torch::Tensor ids = torch::empty(
       {act_size},
       torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA));
@@ -105,9 +115,9 @@ void GpuIdMap::DeleteIds(const torch::Tensor &ids, const torch::Tensor &index) {
 
 void GpuIdMap::Clear() {
   id_allocator_->Clear();
-  ids_map_.reset(new cuco::dynamic_map{MapCapacity, cuco::empty_key{EmptyKey},
-                                       cuco::empty_value{EmptyValue},
-                                       cuco::erased_key{ErasedKey}});
+  ids_map_.reset(new cuco::flat_hash_map{MapCapacity, cuco::empty_key{EmptyKey},
+                                         cuco::empty_value{EmptyValue},
+                                         cuco::erased_key{ErasedKey}});
 }
 
 void GpuIdMap::Reserve(size_t id_size) {

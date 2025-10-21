@@ -1,5 +1,5 @@
 #pragma once
-#include <cuco/dynamic_map.cuh>
+#include <cuco/flat_hash_map.cuh>
 
 #include "embedding/id_map.h"
 
@@ -28,10 +28,10 @@ class GpuIdMap : public IdMap {
   // std::pair<torch::Tensor, torch::Tensor> Reserve(size_t id_size) override;
   ~GpuIdMap();
 
-  using MapType = cuco::dynamic_map<int64_t, int64_t>;
+  using MapType = cuco::flat_hash_map<int64_t, int64_t>;
 
  private:
-  std::unique_ptr<cuco::dynamic_map<int64_t, int64_t>> ids_map_;
+  std::unique_ptr<cuco::flat_hash_map<int64_t, int64_t>> ids_map_;
 };
 
 }  // namespace embedding

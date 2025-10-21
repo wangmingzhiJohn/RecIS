@@ -107,7 +107,7 @@ torch::Tensor CpuIdMap::InsertIds(const torch::Tensor &ids) {
 torch::Tensor CpuIdMap::Ids() {
   std::lock_guard<std::mutex> l(mu_);
   int64_t act_size = id_allocator_->GetActiveSize();
-  TORCH_CHECK(ids_map_.size() == act_size, "ids_map_size != act_size",
+  TORCH_CHECK(ids_map_.size() == act_size, "ids_map_size != act_size ",
               ids_map_.size(), " vs ", act_size);
   torch::Tensor ids = torch::empty(
       {act_size},
@@ -123,7 +123,7 @@ torch::Tensor CpuIdMap::Ids() {
 torch::Tensor CpuIdMap::Index() {
   std::lock_guard<std::mutex> l(mu_);
   int64_t act_size = id_allocator_->GetActiveSize();
-  TORCH_CHECK(ids_map_.size() == act_size, "ids_map_size != act_size",
+  TORCH_CHECK(ids_map_.size() == act_size, "ids_map_size != act_size ",
               ids_map_.size(), " vs ", act_size);
 
   torch::Tensor index = torch::empty(
@@ -140,7 +140,7 @@ torch::Tensor CpuIdMap::Index() {
 std::pair<torch::Tensor, torch::Tensor> CpuIdMap::SnapShot() {
   std::lock_guard<std::mutex> l(mu_);
   int64_t act_size = id_allocator_->GetActiveSize();
-  TORCH_CHECK(ids_map_.size() == act_size, "ids_map_size != act_size",
+  TORCH_CHECK(ids_map_.size() == act_size, "ids_map_size != act_size ",
               ids_map_.size(), " vs ", act_size);
 
   torch::Tensor ids = torch::empty(
