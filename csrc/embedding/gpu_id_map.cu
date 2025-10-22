@@ -1,4 +1,6 @@
 #include <ATen/cuda/CUDAContext.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
 
 #include "embedding/gpu_id_map.h"
 #include "ops/hashtable_ops.h"
@@ -40,12 +42,11 @@ torch::Tensor GpuIdMap::Lookup(const torch::Tensor &ids) {
   // insert ids and index not exist into cuco map
   auto pairs = thrust::make_transform_iterator(
       thrust::counting_iterator<std::size_t>{0},
-      cuda::proclaim_return_type<cuco::pair<int64_t, int64_t>>(
-          [new_ids = std::get<0>(new_ids_tuple).data_ptr<int64_t>(),
-           new_indices = new_index.data_ptr<int64_t>()] __device__(auto i) {
-            return cuco::pair<int64_t, int64_t>{new_ids[i], new_indices[i]};
-          }));
-
+      [new_ids = std::get<0>(new_ids_tuple).data_ptr<int64_t>(),
+       new_indices = new_index.data_ptr<int64_t>()] __device__(auto i)
+          -> cuco::pair<int64_t, int64_t> {
+        return cuco::pair<int64_t, int64_t>{new_ids[i], new_indices[i]};
+      });
   ids_map_->insert(pairs, pairs + gen_num,
                    cuco::default_hash_function<int64_t>{},
                    cuda::std::equal_to<int64_t>{}, stream);

@@ -19,7 +19,11 @@
 #include <stdexcept>
 #include <string>
 
+#ifndef USE_ROCM
 #include <cuda_runtime_api.h>
+#else
+#include <hip/hip_runtime.h>
+#endif
 
 namespace cuco {
 /**
@@ -97,7 +101,7 @@ struct cuda_error : public std::runtime_error {
   do {                                                                                             \
     cudaError_t const error = (_call);                                                             \
     if (cudaSuccess != error) {                                                                    \
-      cudaGetLastError();                                                                          \
+      (void)cudaGetLastError();                                                                          \
       throw _exception_type{std::string{"CUDA error at: "} + __FILE__ + CUCO_STRINGIFY(__LINE__) + \
                             ": " + cudaGetErrorName(error) + " " + cudaGetErrorString(error)};     \
     }                                                                                              \

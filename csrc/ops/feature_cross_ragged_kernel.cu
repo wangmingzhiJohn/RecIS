@@ -8,8 +8,15 @@
 #include <thrust/unique.h>
 #include <torch/extension.h>
 
+#ifdef USE_ROCM
+#include <hipcub/device/device_segmented_radix_sort.hpp>
+#include <hipcub/device/device_segmented_sort.hpp>
+#include <hipcub/hipcub.hpp>
+#else
+#include <cub/cub.cuh>
 #include <cub/device/device_segmented_radix_sort.cuh>
 #include <cub/device/device_segmented_sort.cuh>
+#endif
 
 #include "cuda/cuda_param.cuh"
 #include "cuda/utils.cuh"
@@ -18,6 +25,10 @@
 
 namespace recis {
 namespace functional {
+
+#ifdef USE_ROCM
+namespace cub = hipcub;
+#endif
 
 template <typename key_t, typename value_t, typename index_t>
 void device_segment_sort(const key_t* key_input,    // [total_elems]

@@ -14,17 +14,40 @@
  * limitations under the License.
  */
 
+#ifdef USE_ROCM
+// .inl file will not be hipified, so we need to include the hip version of the file
+// or we will encounter redefinition of bitwise_compare
+#include <cuco/detail/bitwise_compare_hip.cuh>
+#include <cuco/detail/error_hip.hpp>
+#include <cuco/detail/utils_hip.cuh>
+
+#include <hipcub/device/device_select.hpp>
+#include <thrust/tuple.h>
+
+#define cudaStream_t hipStream_t
+#define cudaStreamSynchronize hipStreamSynchronize
+#define cudaMemsetAsync hipMemsetAsync
+#define cudaMemcpyAsync hipMemcpyAsync
+#define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
+#define cudaMemcpyHostToDevice hipMemcpyHostToDevice
+#else
+#include <cub/device/device_select.cuh>
 #include <cuco/detail/bitwise_compare.cuh>
 #include <cuco/detail/error.hpp>
 #include <cuco/detail/utils.cuh>
 
-#include <cub/device/device_select.cuh>
 #include <cuda/std/tuple>
+#endif
+
 #include <cuda/std/utility>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 
 namespace cuco {
+
+#ifdef USE_ROCM
+namespace cub = hipcub;
+#endif
 
 template <typename Key, typename Value, cuda::thread_scope Scope, typename Allocator>
 flat_hash_map<Key, Value, Scope, Allocator>::flat_hash_map(std::size_t initial_capacity,
@@ -223,11 +246,21 @@ std::pair<KeyOut, ValueOut> flat_hash_map<Key, Value, Scope, Allocator>::retriev
     thrust::make_transform_iterator(slots_begin, cuco::detail::slot_to_tuple<Key, Value>{});
   auto const empty_key  = empty_key_sentinel();
   auto const erased_key = erased_key_sentinel();
+
+#ifndef NV_PLATFORM
+  // ROCm thrust doesn't support cuda::std::tuple, use thrust::tuple
+  auto filled           = [=] __device__(auto slot) {
+    return not cuco::detail::bitwise_compare(thrust::get<0>(slot), empty_key) and
+           not cuco::detail::bitwise_compare(thrust::get<0>(slot), erased_key);
+  };
+  auto zipped_out_begin = thrust::make_zip_iterator(thrust::make_tuple(keys_out, values_out));
+#else
   auto filled           = [=] __device__(auto slot) {
     return not cuco::detail::bitwise_compare(cuda::std::get<0>(slot), empty_key) and
            not cuco::detail::bitwise_compare(cuda::std::get<0>(slot), erased_key);
   };
   auto zipped_out_begin = thrust::make_zip_iterator(cuda::std::tuple{keys_out, values_out});
+#endif
 
   std::size_t temp_storage_bytes = 0;
   using temp_allocator_type =
@@ -593,7 +626,7 @@ __device__ bool flat_hash_map<Key, Value, Scope, Allocator>::device_mutable_view
     if (bucket_contains_available) {
       // the first lane in the group with an empty slot will attempt the insert
       insert_result status{insert_result::CONTINUE};
-      uint32_t src_lane = __ffs(bucket_contains_available) - 1;
+      uint32_t src_lane = __ffs(static_cast<int>(bucket_contains_available)) - 1;
 
       if (g.thread_rank() == src_lane) {
         // One single CAS operation if `value_type` is packable
@@ -703,7 +736,7 @@ __device__ bool flat_hash_map<Key, Value, Scope, Allocator>::device_mutable_view
 
     // Key exists, return true if successfully deleted
     if (exists) {
-      uint32_t src_lane = __ffs(exists) - 1;
+      uint32_t src_lane = __ffs(static_cast<int>(exists)) - 1;
 
       bool status;
       if (g.thread_rank() == src_lane) {
@@ -811,7 +844,7 @@ flat_hash_map<Key, Value, Scope, Allocator>::device_view::find(CG g,
     // so we return an iterator to the entry
     auto const exists = g.ballot(not slot_is_empty and key_equal(existing_key, k));
     if (exists) {
-      uint32_t src_lane = __ffs(exists) - 1;
+      uint32_t src_lane = __ffs(static_cast<int>(exists)) - 1;
       // TODO: This shouldn't cast an iterator to an int to shuffle. Instead, get the index of the
       // current_slot and shuffle that instead.
       intptr_t res_slot = g.shfl(reinterpret_cast<intptr_t>(current_slot), src_lane);
@@ -851,7 +884,7 @@ flat_hash_map<Key, Value, Scope, Allocator>::device_view::find(CG g,
     // the entry
     auto const exists = g.ballot(not slot_is_empty and key_equal(existing_key, k));
     if (exists) {
-      uint32_t src_lane = __ffs(exists) - 1;
+      uint32_t src_lane = __ffs(static_cast<int>(exists)) - 1;
       // TODO: This shouldn't cast an iterator to an int to shuffle. Instead, get the index of the
       // current_slot and shuffle that instead.
       intptr_t res_slot = g.shfl(reinterpret_cast<intptr_t>(current_slot), src_lane);
@@ -921,3 +954,13 @@ flat_hash_map<Key, Value, Scope, Allocator>::device_view::contains(
   }
 }
 }  // namespace cuco
+
+#ifdef USE_ROCM
+// Clean up HIP compatibility macros to avoid polluting other files
+#undef cudaStream_t
+#undef cudaStreamSynchronize
+#undef cudaMemsetAsync
+#undef cudaMemcpyAsync
+#undef cudaMemcpyDeviceToHost
+#undef cudaMemcpyHostToDevice
+#endif

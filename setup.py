@@ -38,15 +38,37 @@ def nv_device():
     return "NVIDIA" in get_device_name() or "Tesla" in get_device_name()
 
 
+def amd_device():
+    amd_platform = os.environ.get("AMD_PLATFORM", None)
+    if amd_platform is not None:
+        return amd_platform == "1"
+    return "AMD" in get_device_name()
+
+
 def get_main_extension():
     include_dirs = [
         "csrc",
         "third_party",
         "third_party/cuCollections/include",
-        "third_party/cccl/cub",
-        "third_party/cccl/thrust",
-        "third_party/cccl/libcudacxx/include",
     ]
+    if nv_device():
+        include_dirs.extend(
+            [
+                "third_party/cccl/cub",
+                "third_party/cccl/thrust",
+                "third_party/cccl/libcudacxx/include",
+            ]
+        )
+    elif amd_device():
+        pass
+    else:
+        include_dirs.extend(
+            [
+                "third_party/cccl/cub",
+                "third_party/cccl/thrust",
+                "third_party/cccl/libcudacxx/include",
+            ]
+        )
     library_dirs = ["/usr/local/lib64/"]
     extra_link_args = ["-lomp", "-Wl,-rpath,$ORIGIN"]
     include_dirs = [os.path.join(BASEDIR, include_dir) for include_dir in include_dirs]
@@ -65,16 +87,29 @@ def get_main_extension():
     gcc_args = ["-g", "-fopenmp"]
     nvcc_args = [
         "-O2",
-        "--expt-extended-lambda",
-        "--expt-relaxed-constexpr",
-        "-lineinfo",
     ]
     # nvcc_args = ["-O0", "--expt-extended-lambda", "--expt-relaxed-constexpr", "-lineinfo", "-G"]
 
     if nv_device():
-        nvcc_args.extend(["-DNV_PLATEFORM=1"])
+        nvcc_args.extend(
+            [
+                "-lineinfo",
+                "--expt-extended-lambda",
+                "--expt-relaxed-constexpr",
+                "-DNV_PLATFORM=1",
+            ]
+        )
+    elif amd_device():
+        nvcc_args.extend(["-DAMD_PLATFORM=1"])
     else:
-        nvcc_args.extend(["-DCCCL_DISABLE_FP16_SUPPORT=1"])
+        nvcc_args.extend(
+            [
+                "-lineinfo",
+                "--expt-extended-lambda",
+                "--expt-relaxed-constexpr",
+                "-DCCCL_DISABLE_FP16_SUPPORT=1",
+            ]
+        )
 
     ext = cpp_extension.CUDAExtension(
         name="recis.lib.recis",

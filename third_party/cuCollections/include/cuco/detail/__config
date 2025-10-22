@@ -19,6 +19,7 @@
 #include <nv/target>
 #include <cuda/std/version>
 
+#ifndef __HIP_PLATFORM_AMD__
 #if !defined(__CUDACC_VER_MAJOR__) || !defined(__CUDACC_VER_MINOR__)
 #error "NVCC version not found"
 #elif __CUDACC_VER_MAJOR__ < 11 || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 5)
@@ -54,4 +55,15 @@
 
 #if defined(CUDART_VERSION) && (CUDART_VERSION >= 12000)
 #define CUCO_HAS_CG_REDUCE_UPDATE_ASYNC
+#endif
+
+ 
+#endif
+ 
+// TODO: need to check which version of HIP provides these features
+#ifdef __HIP_PLATFORM_AMD__
+#define CUCO_HAS_CG_INVOKE_ONE
+#define CUCO_HAS_INDEPENDENT_THREADS
+#define CUCO_HAS_CG_REDUCE_UPDATE_ASYNC
+#define CUCO_HAS_INT128
 #endif

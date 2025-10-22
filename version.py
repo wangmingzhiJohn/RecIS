@@ -19,9 +19,20 @@ def get_cuda_version():
 
 def get_version():
     version = get_package_version()
-    torch_version = "torch" + torch.__version__.replace(".", "").replace("+", "")
-    cuda_version = "cuda" + torch.version.cuda.replace(".", "")
-    version = ".".join(version) + "+" + cuda_version + torch_version
+    torch_version_clean = torch.__version__.split(".git")[0]
+    torch_version = f"torch{torch_version_clean.replace('.', '').replace('+', '')}"
+
+    if torch.version.cuda is not None:
+        cuda_version = f"cuda{torch.version.cuda.replace('.', '')}"
+    elif torch.version.hip is not None:
+        # hip version is messy
+        cuda_version = ""
+    else:
+        raise RuntimeError(
+            "Neither CUDA nor ROCm/HIP version found in PyTorch installation"
+        )
+
+    version = f"{'.'.join(version)}+{cuda_version}{torch_version}"
     return version
 
 

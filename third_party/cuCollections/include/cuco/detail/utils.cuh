@@ -25,6 +25,11 @@
 #include <cuda/std/tuple>
 #include <cuda/std/type_traits>
 
+#ifdef USE_ROCM
+// ROCm: need thrust::tuple for compatibility with thrust::zip_iterator
+#include <thrust/tuple.h>
+#endif
+
 #include <cstddef>
 
 #if defined(CUCO_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION)
@@ -135,18 +140,26 @@ namespace detail {
 template <typename Key, typename Value>
 struct slot_to_tuple {
   /**
-   * @brief Converts a pair to a `cuda::std::tuple`.
+   * @brief Converts a pair to a tuple
    *
    * @tparam S The slot type
    *
    * @param s The slot to convert
-   * @return A cuda::std::tuple containing `s.first` and `s.second`
+   * @return A tuple containing `s.first` and `s.second`
    */
   template <typename S>
+#ifndef NV_PLATFORM
+  // ROCm: thrust::zip_iterator requires thrust::tuple
+  __device__ thrust::tuple<Key, Value> operator()(S const& s)
+  {
+    return thrust::make_tuple(s.first, s.second);
+  }
+#else
   __device__ cuda::std::tuple<Key, Value> operator()(S const& s)
   {
     return cuda::std::tuple<Key, Value>(s.first, s.second);
   }
+#endif
 };
 
 /**

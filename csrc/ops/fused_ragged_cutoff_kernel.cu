@@ -2,12 +2,22 @@
 #include <stdio.h>
 
 #include <algorithm>
+
+#ifdef USE_ROCM
+#include <hipcub/agent/single_pass_scan_operators.hpp>
+#include <hipcub/block/block_scan.hpp>
+#include <hipcub/hipcub.hpp>
+#include <hipcub/util_device.hpp>
+#include <hipcub/util_temporary_storage.hpp>
+#else
 #include <cub/agent/single_pass_scan_operators.cuh>
 #include <cub/block/block_scan.cuh>
 #include <cub/cub.cuh>
 #include <cub/util_device.cuh>
 #include <cub/util_temporary_storage.cuh>
 #include <cub/version.cuh>
+#endif
+
 #include <tuple>
 
 #include "ATen/Dispatch.h"
@@ -25,6 +35,10 @@
 
 namespace recis {
 namespace functional {
+
+#ifdef USE_ROCM
+namespace cub = hipcub;
+#endif
 
 template <typename index_t>
 __global__ void post_cutoff_lens_kernel(
@@ -181,7 +195,7 @@ cudaError_t ragged_tile_state_init(
   ScanTileStateT::AllocationSize(max_tiles, alloc_sz[0]);
   size_t align_sz = 0;
   void* allocations[1] = {(void*)0x1};
-#ifdef NV_PLATEFORM
+#ifdef NV_PLATFORM
   err = cub::detail::AliasTemporaries((void*)NULL, align_sz, allocations,
 #else
   err = cub::AliasTemporaries((void*)NULL, align_sz, allocations,
@@ -219,7 +233,7 @@ std::tuple<at::Tensor, at::Tensor> seg_scan_cuda(at::Tensor fea_offset,
 
   AT_DISPATCH_INDEX_TYPES(values.scalar_type(), "segment_scan_cuda_op", [&] {
   // using index_t = int32_t;
-#ifdef NV_PLATEFORM
+#ifdef NV_PLATFORM
     typedef typename cub::ScanTileState<index_t> ScanTileStateT;
 #else
     typedef typename cub::ScanTileState<index_t, false> ScanTileStateT;
@@ -398,7 +412,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> seg_gen_offsets_cuda(
                         MAX_THREADS_PER_BLOCK;
 
     // scan init host
-#ifdef NV_PLATEFORM
+#ifdef NV_PLATFORM
         typedef typename cub::ScanTileState<index_t> ScanTileStateT;
 #else
         typedef typename cub::ScanTileState<index_t, false> ScanTileStateT;

@@ -22,7 +22,7 @@ class CudaVecParam {
 
   ~CudaVecParam() {
     if (cuda_data_) {
-      cudaStreamSynchronize(stream_);
+      CHECK_CUDA_ERROR(cudaStreamSynchronize(stream_));
       delete_cuda_ptr(cuda_data_);
     }
   }

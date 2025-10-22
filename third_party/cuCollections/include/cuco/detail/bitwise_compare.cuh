@@ -16,7 +16,10 @@
 
 #pragma once
 
+#ifndef USE_ROCM
 #include <cuda/functional>
+#endif
+
 #include <cuda/std/bit>
 
 #include <cstdint>
@@ -122,7 +125,13 @@ template <typename T>
 __host__ __device__ constexpr std::size_t alignment()
 {
   constexpr std::size_t alignment = cuda::std::bit_ceil(sizeof(T));
+#ifndef USE_ROCM
   return cuda::std::min(std::size_t{16}, alignment);
+#else
+  // hack: std::min will be hipified to ::min which is not constexpr
+  // so we need to use stdstd::min, after hipify, it becomes std::min which is constexpr
+  return stdstd::min(std::size_t{16}, alignment);
+#endif
 }
 
 /**

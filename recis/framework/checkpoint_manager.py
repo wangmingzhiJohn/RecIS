@@ -444,7 +444,10 @@ class CheckpointManager:
     """
 
     def __init__(
-        self, saver: Saver, save_interval: int, save_every_n_windows: Optional[int] = None
+        self,
+        saver: Saver,
+        save_interval: int,
+        save_every_n_windows: Optional[int] = None,
     ) -> None:
         """Initialize the checkpoint manager.
 

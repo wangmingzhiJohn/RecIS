@@ -76,7 +76,7 @@ __global__ void block_apply_adamw_cuda_kernel(
           index_vec, grad, emb_blocks, exp_avg, exp_avg_sq, alpha, num_ids, \
           embedding_dim, block_size, beta1, beta2, weight_decay, eps,       \
           id_tile_size, emb_tile_size);                                     \
-  cudaStreamSynchronize(stream);
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 
 template <typename scalar_t, typename beta_t>
 void block_apply_adamw_kernel_launcher(

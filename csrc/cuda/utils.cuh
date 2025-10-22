@@ -18,9 +18,10 @@ __inline__ void checkCudaError(cudaError_t err, const char* file, int line) {
 
 __inline__ int get_sm_count() {
   int device;
-  cudaGetDevice(&device);
+  CHECK_CUDA_ERROR(cudaGetDevice(&device));
   int sm_count;
-  cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, device);
+  CHECK_CUDA_ERROR(cudaDeviceGetAttribute(
+      &sm_count, cudaDevAttrMultiProcessorCount, device));
   return sm_count;
 }
 
@@ -39,9 +40,10 @@ T* cuda_malloc_and_copy(T* src, int size, cudaStream_t stream = 0,
                         bool async = true) {
   size_t total_bytes = size * sizeof(T);
   T* dst = cuda_malloc<T>(total_bytes, stream);
-  cudaMemcpyAsync(dst, src, total_bytes, cudaMemcpyHostToDevice, stream);
+  CHECK_CUDA_ERROR(
+      cudaMemcpyAsync(dst, src, total_bytes, cudaMemcpyHostToDevice, stream));
   if (!async) {
-    cudaStreamSynchronize(stream);
+    CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
   }
   return dst;
 }
@@ -51,9 +53,9 @@ T* cuda_malloc_and_memset(unsigned char byte, size_t size,
                           cudaStream_t stream = 0, bool async = true) {
   size_t total_bytes = size * sizeof(T);
   T* dst = cuda_malloc<T>(total_bytes, stream);
-  cudaMemsetAsync(dst, byte, total_bytes, stream);
+  CHECK_CUDA_ERROR(cudaMemsetAsync(dst, byte, total_bytes, stream));
   if (!async) {
-    cudaStreamSynchronize(stream);
+    CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
   }
   return dst;
 }
