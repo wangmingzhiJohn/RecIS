@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cub/block/block_reduce.cuh>
 #include <vector>
 
 #include "cuda/atomic_fast.cuh"
@@ -27,12 +28,48 @@ __global__ void segment_reduce_forward_kernel(
     const offset_t* __restrict__ offsets, scalar_t* output, int64_t B,
     int64_t N, int64_t S, int64_t D) {
   using AP = Packer<scalar_t, PACK_SIZE>;
+  using BlockReduce = cub::BlockReduce<scalar_t, 256>;
+  // These shared variables will be optimized out by the compiler
+  // if we are not computing weighted mean.
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  __shared__ scalar_t s_weight_sum;
 
   for (int s = blockIdx.x; s < S - 1; s += gridDim.x) {
     offset_t start = offsets[s];
     offset_t end = offsets[s + 1];
     int64_t length = end - start;
     int64_t total_size = length * D;
+
+    scalar_t weight_sum = 0;
+    if constexpr (USE_WEIGHT && mode == ReduceMode::MEAN) {
+      // The loop ending condition should be `i / blockDim.x * blockDim.x <
+      // length` instead of `i < length`, because the last block may have some
+      // threads not doing BlockReduce in the condition `i < length`, which
+      // leads to deadlock.
+      for (int64_t i = threadIdx.x; i / blockDim.x * blockDim.x < length;
+           i += blockDim.x) {
+        scalar_t w = 0;
+        if (i < length) {
+          w = weight[start + i];
+        }
+        scalar_t res = BlockReduce(temp_storage).Sum(w);
+        // Only thread 0 has the reduce sum result.
+        if (threadIdx.x == 0) {
+          weight_sum += res;
+        }
+        // NOTE: A subsequent __syncthreads() threadblock barrier should be
+        // invoked after calling BlockReduce if the collective’s temporary
+        // storage (e.g., temp_storage) is to be reused or repurposed.
+        __syncthreads();
+      }
+      // Copy the result to the shared memory.
+      if (threadIdx.x == 0) {
+        s_weight_sum = weight_sum;
+      }
+      __syncthreads();
+      // Broadcast the result to all threads.
+      weight_sum = s_weight_sum;
+    }
 
     for (int64_t i_base = threadIdx.x; i_base * PACK_SIZE < total_size;
          i_base += blockDim.x) {
@@ -44,9 +81,11 @@ __global__ void segment_reduce_forward_kernel(
       scalar_t w = 1;
       if constexpr (USE_WEIGHT) {
         w = weight[idx];
+      } else {
+        weight_sum = static_cast<scalar_t>(length);
       }
       if constexpr (mode == ReduceMode::MEAN) {
-        w = w / length;
+        w = w / weight_sum;
       }
 
       typename AP::type a_vec;
@@ -83,11 +122,47 @@ __global__ void segment_reduce_backward_kernel(
     const offset_t* __restrict__ offsets, scalar_t* grad_unique_emb, int64_t B,
     int64_t N, int64_t S, int64_t D) {
   using AP = Packer<scalar_t, PACK_SIZE>;
+  using BlockReduce = cub::BlockReduce<scalar_t, 256>;
+  // These shared variables will be optimized out by the compiler
+  // if we are not computing weighted mean.
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  __shared__ scalar_t s_weight_sum;
 
   for (int64_t s = blockIdx.x; s < S - 1; s += gridDim.x) {
     offset_t start = offsets[s];
     offset_t end = offsets[s + 1];
     int64_t length = end - start;
+
+    scalar_t weight_sum = 0;
+    if constexpr (USE_WEIGHT && mode == ReduceMode::MEAN) {
+      // The loop ending condition should be `i / blockDim.x * blockDim.x <
+      // length` instead of `i < length`, because the last block may have some
+      // threads not doing BlockReduce in the condition `i < length`, which
+      // leads to deadlock.
+      for (int64_t i = threadIdx.x; i / blockDim.x * blockDim.x < length;
+           i += blockDim.x) {
+        scalar_t w = 0;
+        if (i < length) {
+          w = weight[start + i];
+        }
+        scalar_t res = BlockReduce(temp_storage).Sum(w);
+        // Only thread 0 has the reduce sum result.
+        if (threadIdx.x == 0) {
+          weight_sum += res;
+        }
+        // NOTE: A subsequent __syncthreads() threadblock barrier should be
+        // invoked after calling BlockReduce if the collective’s temporary
+        // storage (e.g., temp_storage) is to be reused or repurposed.
+        __syncthreads();
+      }
+      // Copy the result to the shared memory.
+      if (threadIdx.x == 0) {
+        s_weight_sum = weight_sum;
+      }
+      __syncthreads();
+      // Broadcast the result to all threads.
+      weight_sum = s_weight_sum;
+    }
 
     for (int64_t i = threadIdx.x; i * PACK_SIZE < (end - start) * D;
          i += blockDim.x) {
@@ -106,9 +181,11 @@ __global__ void segment_reduce_backward_kernel(
       scalar_t w_base = 1;
       if constexpr (USE_WEIGHT) {
         w_base = weight[idx];
+      } else {
+        weight_sum = static_cast<scalar_t>(length);
       }
       if constexpr (mode == ReduceMode::MEAN) {
-        w_base /= static_cast<scalar_t>(length);
+        w_base /= weight_sum;
       }
 
       for (int j = 0; j < PACK_SIZE; ++j) {
@@ -122,8 +199,7 @@ __global__ void segment_reduce_backward_kernel(
 #define FORWARD_LAUNCH_KERNEL(scalar_t, offset_t, mode, use_weight, vec_size) \
   segment_reduce_forward_kernel<scalar_t, offset_t, mode, use_weight,         \
                                 vec_size>                                     \
-      <<<block_num, block_size, D * sizeof(scalar_t),                         \
-         at::cuda::getCurrentCUDAStream()>>>(                                 \
+      <<<block_num, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(       \
           unique_emb, weight, reverse_indices, offsets, output, B, N, S, D);  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 

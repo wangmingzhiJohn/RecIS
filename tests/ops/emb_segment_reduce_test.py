@@ -88,7 +88,9 @@ class SegmentReduceTest(unittest.TestCase):
                     emb = emb.sum(dim=1)
                 elif mode == "mean":
                     emb = emb.view(-1, 3, emb_dim)
-                    emb = emb.mean(dim=1)
+                    emb = emb.sum(dim=1)
+                    weight_sum = weight.view(-1, 3, 1).sum(dim=1)
+                    emb = emb / weight_sum
                 self.assertTrue(equal(ret.cpu(), emb.cpu()))
                 ret = ret.sum()
                 ret.backward()

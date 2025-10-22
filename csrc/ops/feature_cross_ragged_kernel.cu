@@ -51,6 +51,7 @@ void device_segment_sort(const key_t* key_input,    // [total_elems]
       d_temp_storage, temp_bytes, key_input, key_output, val_input, val_output,
       num_items, num_rows, offsets, offsets + 1, begin_bit, end_bit, stream);
 
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
   cuda::delete_cuda_ptr(d_temp_storage);
 }
 
