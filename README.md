@@ -99,6 +99,10 @@ The RecIS framework implements efficient dynamic embeddings (HashTable) through 
   - Implements vectorized memory access in operators to improve memory access utilization
   - Optimizes reduction operators through warp-level merging, reducing atomic operations and improving memory access utilization
 
+## 🏆 Notable work based on RecIS
+  - [MOON](https://arxiv.org/abs/2508.11999): Generative MLLM-based Multimodal Representation Learning for E-commerce Product Understanding.
+  - [LUM](https://arxiv.org/abs/2502.08309): Unlocking Scaling Law in Industrial Recommendation Systems with a Three-step Paradigm based Large User Model.
+
 ## 📚 Documentation
 
 - [Installation Guide](https://alibaba.github.io/RecIS/installation_en.html)
