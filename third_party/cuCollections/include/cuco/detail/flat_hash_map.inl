@@ -247,18 +247,12 @@ std::pair<KeyOut, ValueOut> flat_hash_map<Key, Value, Scope, Allocator>::retriev
   auto const empty_key  = empty_key_sentinel();
   auto const erased_key = erased_key_sentinel();
 
+  auto filled = detail::slot_is_filled<Key>{empty_key, erased_key};
+
 #ifndef NV_PLATFORM
   // ROCm thrust doesn't support cuda::std::tuple, use thrust::tuple
-  auto filled           = [=] __device__(auto slot) {
-    return not cuco::detail::bitwise_compare(thrust::get<0>(slot), empty_key) and
-           not cuco::detail::bitwise_compare(thrust::get<0>(slot), erased_key);
-  };
   auto zipped_out_begin = thrust::make_zip_iterator(thrust::make_tuple(keys_out, values_out));
 #else
-  auto filled           = [=] __device__(auto slot) {
-    return not cuco::detail::bitwise_compare(cuda::std::get<0>(slot), empty_key) and
-           not cuco::detail::bitwise_compare(cuda::std::get<0>(slot), erased_key);
-  };
   auto zipped_out_begin = thrust::make_zip_iterator(cuda::std::tuple{keys_out, values_out});
 #endif
 

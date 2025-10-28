@@ -170,6 +170,10 @@ struct slot_to_tuple {
 template <typename Key>
 struct slot_is_filled {
   Key empty_key_sentinel_;  ///< The value of the empty key sentinel
+  Key erased_key_sentinel_;  ///< The value of the erased key sentinel
+
+  __host__ __device__ slot_is_filled(Key empty_key_sentinel, Key erased_key_sentinel)
+    : empty_key_sentinel_(empty_key_sentinel), erased_key_sentinel_(erased_key_sentinel) {}
 
   /**
    * @brief Indicates if the target slot `s` is filled.
@@ -182,7 +186,13 @@ struct slot_is_filled {
   template <typename S>
   __device__ bool operator()(S const& s)
   {
-    return not cuco::detail::bitwise_compare(thrust::get<0>(s), empty_key_sentinel_);
+#ifndef NV_PLATFORM
+    return not cuco::detail::bitwise_compare(thrust::get<0>(s), empty_key_sentinel_) and
+           not cuco::detail::bitwise_compare(thrust::get<0>(s), erased_key_sentinel_);
+#else
+    return not cuco::detail::bitwise_compare(cuda::std::get<0>(s), empty_key_sentinel_) and
+           not cuco::detail::bitwise_compare(cuda::std::get<0>(s), erased_key_sentinel_);
+#endif
   }
 };
 
