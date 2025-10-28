@@ -166,14 +166,14 @@ __global__ void block_insert_cuda_kernel(
 
   if (emb_idx + emb_tile_size <= embedding_dim) {
     const scalar_t* emb = is_broadcast
-                              ? src_embeddings
+                              ? src_embeddings + emb_idx
                               : src_embeddings + idx * embedding_dim + emb_idx;
     *(pack_t*)(*(emb_blocks + block_index) + row_index * embedding_dim +
                emb_idx) = *(pack_t*)(emb);
   } else {
     for (auto i = 0; i < embedding_dim - emb_idx; ++i) {
       const scalar_t* emb =
-          is_broadcast ? src_embeddings
+          is_broadcast ? src_embeddings + emb_idx + i
                        : src_embeddings + idx * embedding_dim + emb_idx + i;
       emb_blocks[block_index][row_index * embedding_dim + emb_idx + i] = *emb;
     }
