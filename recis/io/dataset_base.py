@@ -76,17 +76,18 @@ def _batch_convert(dense_column, ragged_format, dtype):
                         if torch.is_floating_point(values):
                             values = values.to(dtype)
                         row_splits = [torch.from_dlpack(d) for d in data[1:][::-1]]
-                        dense_shape = tuple(
-                            [row_splits[0].numel() - 1] + [-1] * len(row_splits)
-                        )
-                        if ragged_format:
-                            batch_list[table][fn] = RaggedTensor(
-                                values=values,
-                                offsets=row_splits,
-                                dense_shape=dense_shape,
-                            )
-                        elif len(row_splits) > 0:
-                            batch_list[table][fn] = ragged_to_sparse(values, row_splits)
+                        if len(row_splits) > 0:
+                            if ragged_format:
+                                dense_shape = tuple(
+                                    [row_splits[0].numel() - 1] + [-1] * len(row_splits)
+                                )
+                                batch_list[table][fn] = RaggedTensor(
+                                    values=values,
+                                    offsets=row_splits,
+                                    dense_shape=dense_shape,
+                                )
+                            else:
+                                batch_list[table][fn] = ragged_to_sparse(values, row_splits)
                         else:
                             batch_list[table][fn] = values
                     else:
