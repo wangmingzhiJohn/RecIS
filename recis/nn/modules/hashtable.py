@@ -276,6 +276,7 @@ class HashTable(torch.nn.Module):
             else None
         )
         ids, index = ids.unique(return_inverse=True)
+        index = index.to("cuda", non_blocking=True)
         if self.training and self._dtype not in (torch.int8, torch.int32, torch.int64):
             emb_idx, embedding = HashTableLookupHelpFunction.apply(
                 ids, self._hashtable_impl, self._backward_holder, admit_hook_impl
@@ -364,6 +365,10 @@ class HashTable(torch.nn.Module):
     def clear(self) -> None:
         """Clear all stored embeddings."""
         self._hashtable_impl.clear()
+
+    def clear_child(self, child) -> None:
+        """Clear child hashtable."""
+        self._hashtable_impl.clear_child(child)
 
     def ids(self) -> torch.Tensor:
         """Get all stored feature IDs.

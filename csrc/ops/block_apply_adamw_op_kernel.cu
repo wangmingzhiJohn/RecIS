@@ -34,6 +34,10 @@ __global__ void block_apply_adamw_cuda_kernel(
   if (idx >= num_ids || emb_idx >= embedding_dim) return;
 
   auto index = index_vec[idx];
+  if (index < 0) {
+    CUDA_KERNEL_ASSERT(index == -1);
+    return;
+  }
   auto block_index = index / block_size;
   auto row_offset = index % block_size * embedding_dim;
   if (emb_idx + emb_tile_size <= embedding_dim) {

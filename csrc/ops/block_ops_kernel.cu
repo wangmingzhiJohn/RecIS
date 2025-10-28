@@ -157,6 +157,10 @@ __global__ void block_insert_cuda_kernel(
   if (with_mask && !mask[idx]) return;
 
   int64_t id = ids[idx];
+  if (id < 0) {
+    CUDA_KERNEL_ASSERT(id == -1);
+    return;
+  }
   int64_t block_index = id / block_size;
   int64_t row_index = id % block_size;
 

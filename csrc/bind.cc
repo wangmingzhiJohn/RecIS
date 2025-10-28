@@ -96,6 +96,7 @@ TORCH_LIBRARY(recis, m) {
       .def("embedding_lookup", &Hashtable::EmbeddingLookup)
       .def("insert", &Hashtable::Insert)
       .def("clear", &Hashtable::Clear)
+      .def("clear_child", &Hashtable::ClearChild)
       .def("clear_id", &Hashtable::ClearId)
       .def("ids", &Hashtable::ids)
       .def("slot_group", &Hashtable::SlotGroup)

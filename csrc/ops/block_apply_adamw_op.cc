@@ -31,6 +31,13 @@ struct BlocksApplyAdamwTFFunctor {
   void operator()(const int64_t beg, const int64_t end) const {
     for (auto i : c10::irange(beg, end)) {
       auto index = index_vec_[i];
+      if (index < 0) {
+        TORCH_CHECK(
+            index == -1,
+            "index of BlocksApplyAdamwTFFunctor must be >= -1, but get ",
+            index);
+        continue;
+      }
       auto block_index = index / block_size_;
       auto row_index = index % block_size_;
       auto offset = row_index * embedding_dim_;

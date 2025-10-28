@@ -185,7 +185,10 @@ class Trainer:
             self.model, self.dense_optimizer, self.dense_lr_scheduler
         )
         if self.sparse_optimizer is not None:
-            self.sparse_optimizer.set_grad_accum_steps(self.gradient_accumulation_steps)
+            # Set sparse grad accumulation steps to 1 because Accelerator already handles loss scaling when backward
+            # The sparse optimizer should not scale gradients again to avoid double scaling.
+            # This interface is preserved for users who wish to manage gradient accumulation manually.
+            self.sparse_optimizer.set_grad_accum_steps(1)
         self._global_step = torch.scalar_tensor(0, dtype=torch.int64)
         self.build_checkpoint_manager(model, args)
         self.has_restore = False

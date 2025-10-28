@@ -11,7 +11,7 @@ import torch.testing._internal.common_utils as common
 
 from recis.hooks.filter_hook import HashTableFilterHook
 from recis.nn.functional import fused_ops
-from recis.nn.hashtable_hook import FilterHook
+from recis.nn.hashtable_hook import AdmitHook, FilterHook
 from recis.nn.initializers import ConstantInitializer
 from recis.nn.modules.embedding import EmbeddingOption
 from recis.nn.modules.embedding_engine import EmbeddingEngine
@@ -185,6 +185,10 @@ class HashTableFilterHookTest(unittest.TestCase):
                     torch.tensor([100, 101, 102], dtype=torch.int64, device="cuda"),
                     torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
                 ),
+                "fea_6": RaggedTensor(
+                    torch.tensor([200, 201, 202], dtype=torch.int64, device="cuda"),
+                    torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
+                ),
             },
             "step_1": {
                 "fea_1": RaggedTensor(
@@ -205,6 +209,10 @@ class HashTableFilterHookTest(unittest.TestCase):
                 ),
                 "fea_4": RaggedTensor(
                     torch.tensor([100, 101, 102], dtype=torch.int64, device="cuda"),
+                    torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
+                ),
+                "fea_6": RaggedTensor(
+                    torch.tensor([200, 201, 202], dtype=torch.int64, device="cuda"),
                     torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
                 ),
             },
@@ -229,6 +237,10 @@ class HashTableFilterHookTest(unittest.TestCase):
                     torch.tensor([100, 101, 102], dtype=torch.int64, device="cuda"),
                     torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
                 ),
+                "fea_6": RaggedTensor(
+                    torch.tensor([200, 201, 202], dtype=torch.int64, device="cuda"),
+                    torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
+                ),
             },
             "step_3": {
                 "fea_1": RaggedTensor(
@@ -239,11 +251,19 @@ class HashTableFilterHookTest(unittest.TestCase):
                     torch.tensor([777777, 28], dtype=torch.int64, device="cuda"),
                     torch.tensor([0, 1, 2, 2], dtype=torch.int64, device="cuda"),
                 ),
+                "fea_6": RaggedTensor(
+                    torch.tensor([200, 201, 202], dtype=torch.int64, device="cuda"),
+                    torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
+                ),
             },
             "step_4": {
                 "fea_3": RaggedTensor(
                     torch.tensor([12, 13, 16, 999], dtype=torch.int64, device="cuda"),
                     torch.tensor([0, 1, 2, 3, 4], dtype=torch.int64, device="cuda"),
+                ),
+                "fea_6": RaggedTensor(
+                    torch.tensor([131, 202, 203], dtype=torch.int64, device="cuda"),
+                    torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
                 ),
             },
             "step_5": {
@@ -254,6 +274,12 @@ class HashTableFilterHookTest(unittest.TestCase):
                 "fea_2": RaggedTensor(
                     torch.tensor([12], dtype=torch.int64, device="cuda"),
                     torch.tensor([0, 1], dtype=torch.int64, device="cuda"),
+                ),
+                "fea_6": RaggedTensor(
+                    torch.tensor(
+                        [999, 200, 201, 202], dtype=torch.int64, device="cuda"
+                    ),
+                    torch.tensor([0, 4], dtype=torch.int64, device="cuda"),
                 ),
             },
             "step_6": {
@@ -272,15 +298,29 @@ class HashTableFilterHookTest(unittest.TestCase):
 
         self.record = {}
         for i in range(8, 68):
-            rt, re = gen_2d_ragged_tensor(
+            rt5, re5 = gen_2d_ragged_tensor(
                 batch_size=5000,
                 max_row_length=20,
                 is_ragged=False,
                 device="cuda",
             )
-            for e in re:
+            for e in re5:
                 self.record[e] = i
-            self.ids[f"step_{i}"] = {"fea_5": rt}
+            rt7, re7 = gen_2d_ragged_tensor(
+                batch_size=5000,
+                max_row_length=20,
+                is_ragged=False,
+                device="cuda",
+            )
+            for e in re7:
+                if e in self.record:
+                    # print(f"{e} in record!, update step = {i}")
+                    self.record[e] = i
+                # else:
+                # print(f"{e} not in record!, at step = {i}")
+            self.ids[f"step_{i}"] = {"fea_5": rt5, "fea_7": rt7}
+
+        # print(f"!!!!!adasd self.record = {self.record}")
 
         # max(8 + 50 + 1, 7 + 10 * 6) = 67 (The first time when id is filtered of fea 5 hashtable)
         # 67 - 50 = 17 (The latest step of id to be filterd)
@@ -289,6 +329,7 @@ class HashTableFilterHookTest(unittest.TestCase):
         self.valid_ids = [key for key, value in self.record.items() if value > 17]
         self.valid_ids_numel = len(self.valid_ids)
 
+        print(f"self.invalid_ids_numel = {self.invalid_ids_numel}")
         for i in range(68, 69):
             tmp_val = list(range(100000000, 100000000 + self.invalid_ids_numel + 1))
             rt, re = gen_2d_ragged_tensor(
@@ -331,6 +372,20 @@ class HashTableFilterHookTest(unittest.TestCase):
                 ),
                 trainable=False,
             ),
+            "fea_6": EmbeddingOption(
+                embedding_dim=8,
+                shared_name="ht1",
+                combiner="mean",
+                initializer=ConstantInitializer(init_val=3.0),
+                device=torch.device(self.DEVICE),
+                filter_hook=FilterHook(
+                    "GlobalStepFilter", {"filter_step": group_a_filter_step}
+                ),
+                admit_hook=AdmitHook(
+                    "ReadOnly"
+                ),  # id from feature 6 is not admitted to ht1
+                trainable=True,
+            ),
         }
         self.group_a["ht2"]["emb_opt"] = {
             "fea_2": EmbeddingOption(
@@ -368,7 +423,21 @@ class HashTableFilterHookTest(unittest.TestCase):
                 filter_hook=FilterHook(
                     "GlobalStepFilter", {"filter_step": group_c_filter_step}
                 ),
-            )
+            ),
+            "fea_7": EmbeddingOption(
+                embedding_dim=2,
+                shared_name="ht4",
+                combiner="sum",
+                initializer=ConstantInitializer(init_val=8.0),
+                device=torch.device(self.DEVICE),
+                filter_hook=FilterHook(
+                    "GlobalStepFilter",
+                    {"filter_step": group_c_filter_step},
+                ),
+                admit_hook=AdmitHook(
+                    "ReadOnly"
+                ),  # id from feature 7 is not admitted to ht7
+            ),
         }
 
     def setEmbeddingEngine(self):
@@ -410,8 +479,8 @@ class HashTableFilterHookTest(unittest.TestCase):
 
     def setEncodeIds(self):
         self.encode_ids = defaultdict(str)
-        self.feas = ["fea_1", "fea_2", "fea_3", "fea_4", "fea_5"]
-        for fea in self.ids["step_1"]:
+        self.feas = ["fea_1", "fea_2", "fea_3", "fea_4", "fea_5", "fea_6", "fea_7"]
+        for fea in self.feas:
             self.encode_ids[fea] = self.ee._fea_to_group[fea].encode_id(fea)
 
     def setUp(self):
@@ -431,7 +500,7 @@ class HashTableFilterHookTest(unittest.TestCase):
         for step in range(3):
             step_id = self.ids[f"step_{step}"]
             out = self.ee(step_id)
-            (out["fea_1"].sum() + out["fea_2"].sum()).backward()
+            (out["fea_1"].sum() + out["fea_2"].sum() + out["fea_6"].sum()).backward()
             self.opt.step()
             self.opt.zero_grad()
             self.hook.after_step(-1, step)  # run filter
@@ -475,7 +544,7 @@ class HashTableFilterHookTest(unittest.TestCase):
         for step in range(3, 4):
             step_id = self.ids[f"step_{step}"]
             out = self.ee(step_id)
-            (out["fea_1"].sum() + out["fea_2"].sum()).backward()
+            (out["fea_1"].sum() + out["fea_2"].sum() + out["fea_6"].sum()).backward()
             self.opt.step()
             self.opt.zero_grad()
             self.hook.after_step(-1, step)  # run filter.
@@ -513,6 +582,10 @@ class HashTableFilterHookTest(unittest.TestCase):
         for step in range(4, 5):
             step_id = self.ids[f"step_{step}"]
             out = self.ee(step_id)
+            (out["fea_3"].sum() + out["fea_6"].sum()).backward()
+            self.opt.step()
+            self.opt.zero_grad()
+
             self.hook.after_step(-1, step)  # run filter hook
 
             ids, mmap = self.tables["group_a"]["ht"].ids_map()
@@ -546,7 +619,7 @@ class HashTableFilterHookTest(unittest.TestCase):
         for step in range(5, 6):
             step_id = self.ids[f"step_{step}"]
             out = self.ee(step_id)
-            (out["fea_1"].sum() + out["fea_2"].sum()).backward()
+            (out["fea_1"].sum() + out["fea_2"].sum() + out["fea_6"].sum()).backward()
             self.opt.step()
             self.opt.zero_grad()
 
@@ -570,7 +643,6 @@ class HashTableFilterHookTest(unittest.TestCase):
                 .all()
                 .item()
             )
-
         # check embedding and optimizer slot
         group_a_ids, group_a_mmap = self.tables["group_a"]["ht"].ids_map()
         group_b_ids, group_b_mmap = self.tables["group_b"]["ht"].ids_map()
@@ -715,7 +787,10 @@ class HashTableFilterHookTest(unittest.TestCase):
         for step in range(8, 69):
             step_id = self.ids[f"step_{step}"]
             out = self.ee(step_id)
-            out["fea_5"].sum().backward()
+            if step != 68:
+                (out["fea_5"] + out["fea_7"]).sum().backward()
+            else:
+                out["fea_5"].sum().backward()
             self.opt.step()
             self.opt.zero_grad()
             self.hook.after_step(-1, step)

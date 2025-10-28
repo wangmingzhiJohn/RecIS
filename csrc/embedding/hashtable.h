@@ -61,6 +61,7 @@ class Hashtable : public torch::CustomClassHolder {
 
   void Clear();
   void ClearId();
+  void ClearChild(const std::string &child);
   int64_t ids_num() { return id_map_->GetIdNum(); }
   torch::Tensor ids();
   void increment_blocknum(int64_t ids_num);

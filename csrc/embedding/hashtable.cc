@@ -43,6 +43,23 @@
 #include "ops/block_ops.h"
 #include "torch/types.h"
 
+// part for coalesce
+namespace {
+constexpr uint64_t kEncodeLength = 12;
+constexpr uint64_t kMaskLength = 64 - kEncodeLength;
+constexpr uint64_t kMaskBits = (1LL << kMaskLength) - 1;
+}  // namespace
+
+int64_t Hashtable::EncodeIdWithMask(int64_t id, int64_t mask_id) {
+  return (id & kMaskBits) | (mask_id << kMaskLength);
+}
+
+std::pair<int64_t, int64_t> Hashtable::DecodeIdToIndexAndMask(int64_t id) {
+  int64_t decode_id = (id & kMaskBits);
+  int64_t index = (static_cast<size_t>(id) >> kMaskLength);
+  return std::make_pair(decode_id, index);
+}
+
 Hashtable::Hashtable(int64_t block_size,
                      const std::vector<int64_t> &embedding_shape,
                      torch::Dtype dtype, torch::Device device, bool coalesce,
@@ -55,7 +72,6 @@ Hashtable::Hashtable(int64_t block_size,
   std::vector<int64_t> partial_shape = embedding_shape;
   partial_shape.insert(partial_shape.begin(), block_size);
   slot_group_->AppendEmbSlot(dtype, partial_shape, generator);
-
   children_info_ =
       torch::make_intrusive<recis::embedding::ChildrenInfo>(coalesce);
   for (auto index : c10::irange(children.size())) {
@@ -90,20 +106,16 @@ void Hashtable::AcceptGrad(const torch::Tensor &grad_index,
 torch::Tensor Hashtable::grad(int64_t accmulate_steps) {
   auto index = torch::cat(grad_index_, 0);
   auto grad_outputs = torch::cat(grad_, 0);
-
   auto output = at::_unique(index, false, true);
   torch::Tensor unique_values = std::get<0>(output);
   torch::Tensor unique_index = std::get<1>(output);
-
   std::vector<int64_t> final_shape = {};
   final_shape.push_back(0);
   auto emb_shape = grad_outputs.sizes().slice(1);
   final_shape.insert(final_shape.end(), emb_shape.data(),
                      emb_shape.data() + emb_shape.size());
-
   torch::Tensor final_indices;
   torch::Tensor final_grad;
-
   if (index.numel() == unique_values.numel()) {
     final_indices = index.view({1, -1});
     final_grad = grad_outputs;
@@ -113,8 +125,8 @@ torch::Tensor Hashtable::grad(int64_t accmulate_steps) {
       final_shape[0] = 0;
     }
   } else {
-    final_indices = unique_index.view({1, -1});
-    final_shape[0] = unique_index.numel();
+    final_indices = unique_values.view({1, -1});
+    final_shape[0] = unique_values.numel();
     final_grad = torch::zeros(
         final_shape,
         torch::dtype(grad_outputs.dtype()).device(grad_outputs.device()));
@@ -125,7 +137,6 @@ torch::Tensor Hashtable::grad(int64_t accmulate_steps) {
       final_shape[0] = 0;
     }
   }
-
   final_grad = final_grad / accmulate_steps;
   auto sparse_grad =
       torch::sparse_coo_tensor(final_indices, final_grad, final_shape);
@@ -277,6 +288,19 @@ void Hashtable::Delete(const torch::Tensor &ids, const torch::Tensor &index,
   }
 }
 
+void Hashtable::ClearChild(const std::string &child) {
+  TORCH_CHECK(children_info_->HasChild(child), "hashtable ", child,
+              " must be the child of this coalseced hashtable")
+  int64_t child_index = children_info_->ChildIndex(child);
+  torch::Tensor coalesced_ids, coalseced_index;
+  std::tie(coalesced_ids, coalseced_index) = ids_map();
+  auto decode_index = at::bitwise_right_shift(coalesced_ids, kMaskLength);
+  auto mask = at::eq(decode_index, child_index);
+  auto child_delete_ids = at::masked_select(coalesced_ids, mask);
+  auto child_delete_index = at::masked_select(coalseced_index, mask);
+  Delete(child_delete_ids, child_delete_index);
+}
+
 void Hashtable::AppendFilterSlot(
     const std::string &filter_name, torch::Dtype dtype, int64_t slot_dim,
     at::intrusive_ptr<recis::embedding::Generator> generator) {
@@ -293,21 +317,4 @@ void Hashtable::AppendStepFilterSlot(const std::string &filter_name,
 at::intrusive_ptr<recis::embedding::Slot> Hashtable::GetSlot(
     const std::string &name) {
   return slot_group_->GetSlotByName(name);
-}
-
-// part for coalesce
-namespace {
-constexpr uint64_t kEncodeLength = 12;
-constexpr uint64_t kMaskLength = 64 - kEncodeLength;
-constexpr uint64_t kMaskBits = (1LL << kMaskLength) - 1;
-}  // namespace
-
-int64_t Hashtable::EncodeIdWithMask(int64_t id, int64_t mask_id) {
-  return (id & kMaskBits) | (mask_id << kMaskLength);
-}
-
-std::pair<int64_t, int64_t> Hashtable::DecodeIdToIndexAndMask(int64_t id) {
-  int64_t decode_id = (id & kMaskBits);
-  int64_t index = (static_cast<size_t>(id) >> kMaskLength);
-  return std::make_pair(decode_id, index);
 }

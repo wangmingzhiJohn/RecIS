@@ -115,6 +115,12 @@ struct BlocksInsertFunctor {
       const TEmb *emb =
           IsBroadcast ? emb_vec_ : emb_vec_ + src_index * embedding_dim_;
       auto dst_index = index_vec_[src_index];
+      if (dst_index < 0) {
+        TORCH_CHECK(dst_index == -1,
+                    "index of BlocksInsertFunctor must be >= -1, but get ",
+                    dst_index);
+        continue;
+      }
       auto dst_block_index = dst_index / block_size_;
       auto dst_row_index = dst_index % block_size_;
 
