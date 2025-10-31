@@ -366,6 +366,16 @@ class DatasetBase(IterableDataset):
         if io_states:
             self._load_states = copy.deepcopy(io_states)
 
+    def reset(self):
+        """Reset the dataset to initial state.
+
+        Resets the io state, allowing the dataset to be reused from the beginning.
+
+        """
+        self._lock.acquire()
+        self._io_state = mp.Manager().dict()
+        self._lock.release()
+
     def _create_state_dataset(self, dataset, sub_id, sub_num):
         """Creates a state-aware dataset wrapper for checkpointing.
 

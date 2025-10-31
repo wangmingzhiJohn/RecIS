@@ -270,8 +270,7 @@ class Trainer:
                 self.args.train_steps if train_steps is None else train_steps,
                 epoch=epoch,
             )
-            if hasattr(self.train_dataset, "_window_paths"):
-                self.train_dataset.reset()
+            self.train_dataset.reset()
         for hook in self.hooks:
             hook.end()
 
@@ -290,6 +289,8 @@ class Trainer:
                 epoch=epoch,
             )
             self.evaluate(eval_steps=eval_steps)
+            self.train_dataset.reset()
+            self.eval_dataset.reset()
         for hook in self.hooks:
             hook.end()
 
