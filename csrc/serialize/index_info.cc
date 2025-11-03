@@ -40,7 +40,7 @@ void IndexInfo::MergeFrom(IndexInfo &rhv) {
 std::vector<std::string> IndexInfo::SliceInfoOfTensor(
     const std::string &tensor_name) {
   std::vector<std::string> slice_infos;
-  auto empty_block_name = BlockNameEncode(tensor_name, "", "");
+  auto empty_block_name = BlockNameEncode(tensor_name, "");
   for (const auto &kv : block_index_map_) {
     if (util::string::StartsWith(kv.first, empty_block_name)) {
       slice_infos.push_back(SliceInfoFromBlockName(kv.first));
@@ -55,7 +55,7 @@ bool IndexInfo::HasBlock(const std::string &tensor_name,
 }
 
 bool IndexInfo::HashTensor(const std::string &tensor_name) {
-  auto empty_block_name = BlockNameEncode(tensor_name, "", "");
+  auto empty_block_name = BlockNameEncode(tensor_name, "");
   for (const auto &kv : block_index_map_) {
     if (util::string::StartsWith(kv.first, empty_block_name)) {
       return true;
