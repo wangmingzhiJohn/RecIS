@@ -1,10 +1,10 @@
 #ifndef _COLUMN_IO_CC_COLUMN_IO_FRAMEWORK_CUDA_UTILS_H_
 #define _COLUMN_IO_CC_COLUMN_IO_FRAMEWORK_CUDA_UTILS_H_
 
-#include <cuda_runtime_api.h>
 #include <iostream>
 #include <chrono>
 #include <mutex>
+#include "column-io/framework/gpu_runtime.h"
 
 namespace column {
 

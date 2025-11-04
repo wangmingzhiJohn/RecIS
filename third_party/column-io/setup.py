@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 import subprocess
 import os,time,json
 
-COLUMN_IO_VERSION = ["v0.2.9"]
+COLUMN_IO_VERSION = ["v0.2.14"]
 
 def get_compile_cmd():  # type: () -> str
     try:
@@ -14,7 +14,7 @@ def get_compile_cmd():  # type: () -> str
         print("Error:", e.output.decode("utf-8"))
         return ""
 def get_compile_env():  # type: () -> dict[str,str]
-    envset = set({"PATH", "LD", "FLAG", "NEED", "TF", "TORCH"}) 
+    envset = set({"PATH", "LD", "FLAG", "NEED", "TF", "TORCH"})
     env_dict = {}
     for k, v in os.environ.items():
         # if  k not like %envset[i]%  continue

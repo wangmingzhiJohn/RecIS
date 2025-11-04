@@ -68,11 +68,11 @@ public:
     for (int i = 1; i < ragged_ranks.size(); ++i) {
       splits_sub_idx_[i] = splits_sub_idx_[i - 1] + ragged_ranks[i - 1];
     }
-    if (gpu_result) {
+    if (gpu_result_) {
       device_id_ = GetCudaDeviceId();
       GPU_CK(cudaSetDevice(device_id_));
+      GPU_CK(cudaStreamCreate(&stream_));
     }
-    GPU_CK(cudaStreamCreate(&stream_));
   }
 
   int32_t get_batch_size(std::unique_ptr<std::vector<Tensor>> &batch) {
@@ -92,8 +92,10 @@ public:
     }
   }
   ~Dataset() override {
-    GPU_CK(cudaStreamSynchronize(stream_));
-    GPU_CK(cudaStreamDestroy(stream_));
+    if (gpu_result_) {
+      GPU_CK(cudaStreamSynchronize(stream_));
+      GPU_CK(cudaStreamDestroy(stream_));
+    }
   }
 
   std::shared_ptr<IteratorBase>
@@ -110,7 +112,9 @@ private:
                       const std::string &prefix, size_t batch_size)
         : DatasetIterator<Dataset>({dataset, prefix}), batch_size_(batch_size) {
           allocator_ = GetAllocator(this->dataset()->pinned_result_ || this->dataset()->gpu_result_);
-          cuda_allocator_ = GetCudaAllocator(this->dataset()->stream_, this->dataset()->device_id_);
+          if (this->dataset()->gpu_result_) {
+            cuda_allocator_ = GetCudaAllocator(this->dataset()->stream_, this->dataset()->device_id_);
+          }
     }
 
     Status Initialize() override {
@@ -390,7 +394,11 @@ private:
               auto tmp_tensor = Tensor(
                   cuda_allocator_,
                   tensor.Shape(), tensor.Type(),
+#ifdef USE_ROCM
+                  {kDLROCM, this->dataset()->device_id_});
+#else
                   {kDLCUDA, this->dataset()->device_id_});
+#endif
               GPU_CK(cudaMemcpyAsync(
                     tmp_tensor.mutable_data(),
                     tensor.data(), tensor.TotalBytes(),
@@ -402,6 +410,7 @@ private:
         copy_and_push(indicators_t);
         copy_and_push(values_t);
         copy_and_push(splits_t);
+        GPU_CK(cudaStreamSynchronize(this->dataset()->stream_));
       } else {
         std::move(indicators_t.begin(), indicators_t.end(),
                   std::back_inserter(*out_tensors));
@@ -410,7 +419,6 @@ private:
         std::move(splits_t.begin(), splits_t.end(),
                   std::back_inserter(*out_tensors));
       }
-      GPU_CK(cudaStreamSynchronize(this->dataset()->stream_));
       *end_of_sequence = false;
       return Status::OK();
     }
@@ -444,8 +452,8 @@ private:
     size_t batch_size_;
     std::queue<std::vector<Tensor>> output_elements_;
     int max_group_id_ = 0;
-    Allocator* allocator_;
-    Allocator* cuda_allocator_;
+    Allocator* allocator_ = nullptr;
+    Allocator* cuda_allocator_ = nullptr;
   };
 
   size_t batch_size_;
@@ -454,7 +462,7 @@ private:
 
   const std::shared_ptr<DatasetBase> input_;
 
-  framework::StdThreadPool *pool_;
+  std::unique_ptr<framework::StdThreadPool> pool_;
   cudaStream_t stream_;
   int num_tables_;
   std::vector<int> splits_sub_idx_;

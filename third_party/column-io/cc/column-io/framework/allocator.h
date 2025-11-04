@@ -16,7 +16,7 @@ limitations under the License.
 #ifndef _COLUMN_IO_CC_COLUMN_IO_FRAMEWORK_ALLOCATOR_H_
 #define _COLUMN_IO_CC_COLUMN_IO_FRAMEWORK_ALLOCATOR_H_
 
-#include <cuda_runtime_api.h>
+#include "column-io/framework/gpu_runtime.h"
 #include "column-io/framework/refcount.h"
 
 namespace column {

@@ -1,9 +1,15 @@
 #include <mutex>
 #include <unordered_map>
-#include <cuda_runtime_api.h>
-#include <cub/util_allocator.cuh>
 #include <queue>
+
+#ifdef USE_ROCM
+#include <hipcub/util_allocator.hpp>
+#else
+#include <cub/util_allocator.cuh>
+#endif
+
 #include "absl/log/check.h"
+#include "column-io/framework/gpu_runtime.h"
 #include "column-io/framework/allocator.h"
 #include "column-io/framework/cuda_utils.h"
 
@@ -14,6 +20,10 @@
   } while (0)
 
 namespace column {
+
+#ifdef USE_ROCM
+namespace cub = hipcub;
+#endif
 
 namespace {
 

@@ -1,27 +1,33 @@
-cmake_minimum_required(VERSION 3.14)
-project(column-io VERSION 1.0 LANGUAGES CXX CUDA)
+cmake_minimum_required(VERSION 3.21)
+
+include(cmake/gpu_platform.cmake)
+detect_gpu_platform()
+
+if(USE_ROCM)
+    project(column-io VERSION 1.0 LANGUAGES CXX HIP)
+else()
+    project(column-io VERSION 1.0 LANGUAGES CXX CUDA)
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(INTERNAL_VERSION "Option for internal version" ON)
 message(STATUS "internal version: " ${INTERNAL_VERSION})
 if (INTERNAL_VERSION)
-  set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ version selection")  # or 11, 14, 17, 20
   add_definitions(-DINTERNAL_VERSION=1)
 else()
-  set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ version selection")  # or 11, 14, 17, 20
   add_definitions(-DINTERNAL_VERSION=0)
 endif(INTERNAL_VERSION)
 
-set(CMAKE_CXX_STANDARD_REQUIRED ON)  # optional, ensure standard is supported
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(ABSL_PROPAGATE_CXX_STD ON)
 set(CMAKE_SKIP_BUILD_RPATH TRUE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-find_package(CUDA REQUIRED)
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES "70;86")
-endif()
+# Configure GPU platform
+configure_gpu_platform()
 
 add_compile_options(-ggdb -O3 "-fvisibility=hidden")
 
@@ -41,7 +47,6 @@ else()
     add_definitions(-DINTERNAL_VERSION=0)
 endif(INTERNAL_VERSION)
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
 
 set(THIRD_PARTY_DIR "${PROJECT_BINARY_DIR}/third_party_install"
         CACHE PATH "Where to install third party headers and libs")

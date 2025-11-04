@@ -10,15 +10,24 @@ if (INTERNAL_VERSION)
     endif()
 endif()
 
+# Set GPU-specific include and library paths
+if(USE_ROCM)
+    set(GPU_INCLUDE_DIRS ${HIP_INCLUDE_DIRS})
+    set(GPU_LIBRARIES ${HIP_LIBRARIES})
+else()
+    set(GPU_INCLUDE_DIRS ${CUDA_INCLUDE_DIRS})
+    set(GPU_LIBRARIES ${CUDA_LIBRARIES})
+endif()
+
 target_include_directories(framework
-  PUBLIC ${CUDA_INCLUDE_DIRS}
+  PUBLIC ${GPU_INCLUDE_DIRS}
   PUBLIC ${DLPACK_INCLUDE_DIR})
 target_link_libraries(
     framework
     ${ARROW_LIBRARY}
     PRIVATE absl::strings absl::check
     PUBLIC ${BUILT}/protobuf/src/protobuf/cmake/libprotobuf.a
-    ${CUDA_LIBRARIES}
+    ${GPU_LIBRARIES}
 )
 add_dependencies(framework make_pyproto_dir)
 message(STATUS arrow include dir  ${CMAKE_BINARY_DIR}/odps_sdk_cpp/third_party/gcc-8/arrow-1.0.0/include)
