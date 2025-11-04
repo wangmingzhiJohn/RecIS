@@ -9,7 +9,7 @@
 
 **依赖要求**
 - PyTorch 2.4+
-- CUDA 12.4 
+- CUDA 12.4 or ROCm 7.0+
 
 安装方式
 --------
@@ -17,7 +17,7 @@
 Docker 安装(推荐) 
 ~~~~~~~~~~~~~~~~~~
 
-我们提供了 pytorch240/251/260 三个版本的镜像构建脚本，您可以通过命令构建基础镜像，例如
+在NVIDIA GPU上，我们提供了 pytorch240/251/260 三个版本的镜像构建脚本，您可以通过命令构建基础镜像，例如
 
 克隆代码仓库::
 
@@ -56,6 +56,33 @@ Docker 安装(推荐)
 
     python -c "import recis; print('RecIS installed successfully!')"
 
+在AMD GPU 上安装
+~~~~~~~~~~~~~~~~~
+RecIS同样支持AMD GPU，已经验证过的ROCm版本为rocm7.0.2。和NVIDIA GPU上安装RecIS类似的，也可以通过docker或源码的形式安装。
+
+
+构建rocm7.0.2-pytorch271版本的 Docker 镜像::
+
+    docker build --network=host -f docker/Dockerfile.rocm.torch271 -t recis:rocm702_torch271 .
+
+启动rocm7.0.2-pytorch271版本镜像::
+
+    docker run -it \
+        --cap-add=SYS_PTRACE \
+        --security-opt seccomp=unconfined \
+        --device=/dev/kfd \
+        --device=/dev/dri \
+        --group-add video \
+        --ipc=host \
+        --shm-size 8G \
+        recis:rocm702_torch271 /bin/bash
+
+在AMD GPU上源码安装RecIS时，需要注意的是，`libhipcxx`未随着ROCm SDK同步发布，所以需要在环境中先手动编译安装::
+
+    cd ~ && git clone https://github.com/ROCm/libhipcxx.git -b release/2.2.x
+    cd libhipcxx/ && mkdir build && cd build && cmake .. -DCMAKE_INSTALL_PREFIX=/opt/rocm && make install
+    rm -rf libhipcxx/
+
 验证安装
 --------
 
@@ -70,7 +97,7 @@ Docker 安装(推荐)
     # 检查 GPU 支持
     print(f"CUDA available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
-        print(f"CUDA version: {torch.version.cuda}")
+        print(f"CUDA version: {torch.version.cuda}") # or print(f"HIP version: {torch.version.hip}")
         print(f"GPU count: {torch.cuda.device_count()}")
     
     # 简单功能测试

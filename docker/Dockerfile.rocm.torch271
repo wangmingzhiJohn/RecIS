@@ -1,0 +1,42 @@
+# ROCM official image (ubuntu-22.04 + rocm-7.0.2 + python-3.10)
+FROM rocm/pytorch:rocm7.0.2_ubuntu22.04_py3.10_pytorch_release_2.7.1
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV AMD_PLATFORM=1
+ENV ROCM_PATH=/opt/rocm
+# use `rocminfo | grep gfx` to get the architecture
+ENV PYTORCH_ROCM_ARCH=gfx942
+
+RUN mkdir -p /workspace
+
+COPY . /workspace/recis/
+
+RUN pip install --upgrade pip setuptools wheel --trusted-host mirrors.aliyun.com --index-url https://mirrors.aliyun.com/pypi/simple/
+
+RUN cp /etc/apt/sources.list /etc/apt/sources.list.bak && \
+    { \
+    echo "deb https://mirrors.aliyun.com/ubuntu/ jammy main restricted universe multiverse"; \
+    echo "deb https://mirrors.aliyun.com/ubuntu/ jammy-security main restricted universe multiverse"; \
+    echo "deb https://mirrors.aliyun.com/ubuntu/ jammy-updates main restricted universe multiverse"; \
+    echo "deb https://mirrors.aliyun.com/ubuntu/ jammy-backports main restricted universe multiverse"; \
+    } > /etc/apt/sources.list
+
+RUN apt-get update && apt-get install -y libomp-dev ca-certificates lsb-release wget cmake unzip && \
+    wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
+    apt-get install -y ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
+    apt-get update && \
+    apt-get install -y libarrow-dev=21.0.0-1 liborc-dev
+RUN mkdir /usr/local/lib64/ && \
+    ln -s /usr/lib/x86_64-linux-gnu/libomp.so.5 /usr/local/lib64/libomp.so
+
+# install libhipcxx
+RUN cd /workspace/ && git clone https://github.com/ROCm/libhipcxx.git -b release/2.2.x
+RUN cd /workspace/libhipcxx/ && mkdir build && cd build && cmake .. -DCMAKE_INSTALL_PREFIX=/opt/rocm && make install
+
+RUN pip install ninja
+
+RUN cd /workspace/recis/ && sh build.sh 0
+RUN pip install `find /workspace/recis/dist -name "recis*.whl" -maxdepth 1` --trusted-host mirrors.aliyun.com --index-url https://mirrors.aliyun.com/pypi/simple/
+RUN cd /workspace/recis/third_party/column-io/ && sh tools/build_and_install.sh 0
+RUN cd / && rm -rf /workspace/recis/
