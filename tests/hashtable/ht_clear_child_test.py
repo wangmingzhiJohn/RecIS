@@ -517,5 +517,6 @@ class HashTableClearChildTest(unittest.TestCase):
                     len(emb) == 0 and len(exp_avg) == 0 and len(exp_avg_sq) == 0
                 )
 
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,8 @@
 
 #include "ATen/core/Dict.h"
 #include "ATen/core/TensorBody.h"
+#include "data/local_data_resource.h"
+#include "data/sampler_ops.h"
 #include "embedding/adam.h"
 #include "embedding/adamw.h"
 #include "embedding/adamw_tf.h"
@@ -170,6 +172,16 @@ TORCH_LIBRARY(recis, m) {
       .def("tensor_shape", &recis::serialize::CheckpointReader::TensorShape)
       .def("tensor_dtype", &recis::serialize::CheckpointReader::TensorType);
 
+  m.class_<recis::data::LocalDataResource>("LocalDataResource")
+      .def(torch::init<>())
+      .def("load_by_batch", &recis::data::LocalDataResource::LoadByBatch)
+      .def("sample_ids", &recis::data::LocalDataResource::SampleIds)
+      .def("valid_sample_ids", &recis::data::LocalDataResource::ValidSampleIds)
+      .def("extract_feature", &recis::data::LocalDataResource::ExtractFeature);
+
+  m.def("tile_with_sample_counts", recis::data::TileWithSampleCounts);
+  m.def("combine_vector_with_sample_counts",
+        recis::data::CombineVectorWithSampleCounts);
   m.def("ragged_to_dense", recis::functional::ragged_to_dense);
   m.def("ragged_to_sparse", recis::functional::ragged_to_sparse);
   m.def("uint64_mod", recis::functional::uint64_mod);

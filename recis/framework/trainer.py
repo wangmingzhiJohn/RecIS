@@ -330,6 +330,8 @@ class Trainer:
                 continue
             if self.data_to_cuda:
                 data = copy_data_to_device(data, "cuda")
+            for hook in self.hooks:
+                hook.after_data(data)
             metrics = {}
             self.model.eval()
             with torch.no_grad():
@@ -397,6 +399,8 @@ class Trainer:
                 continue
             if self.data_to_cuda:
                 data = copy_data_to_device(data, "cuda")
+            for hook in self.hooks:
+                hook.after_data(data)
             metrics = {}
             with self.accelerator.accumulate(self.model):
                 self._train_step(data, epoch, metrics)

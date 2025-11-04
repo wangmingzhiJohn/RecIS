@@ -2,6 +2,7 @@ import logging
 import math
 import random
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 import torch
@@ -14,6 +15,7 @@ from recis.io.odps_dataset import OdpsDataset, get_table_size
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class TableSheet:
     """Data structure representing a segment of an ODPS table.
 

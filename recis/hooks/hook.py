@@ -97,3 +97,6 @@ class Hook:
         such as closing files, finalizing logs, or releasing resources.
         It is called after all other hook methods have completed.
         """
+
+    def after_data(self, data):
+        """Called after each data batch."""

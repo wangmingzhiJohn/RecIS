@@ -1,6 +1,9 @@
+import os
+
 import column_io.dataset.dataset as column_io_dataset
 import torch
 from column_io.dataset.file_sharding import OdpsTableSharding
+from odps import ODPS
 
 
 try:
@@ -49,7 +52,36 @@ def get_table_size(table_name):
         print(f"Table has {size} rows")
         ```
     """
-    table_size = odps_dataset_func.get_table_size(table_name)
+    if is_turn_on_odps_open_storage():
+        # When open storage is turned on, the table size may be got before creating session,
+        # which will lead to failure. So we use ODPS API to get table size.
+        if "?" in table_name:
+            table_name = table_name.split("?")[0]
+        parts = table_name.split("/")
+        project = parts[2]
+        table = parts[4]
+        partition = parts[5]
+        if int(os.getenv("NOTEBOOK_CONTAINER", "0")) == 1:
+            o = ODPS(
+                os.getenv("ACCESS_ID"),
+                os.getenv("ACCESS_KEY"),
+                project,
+                os.getenv("ODPS_ENDPOINT"),
+                # need to set tunnel_endpoint when running locally
+                tunnel_endpoint=os.getenv("tunnel_end_point"),
+            )
+        else:
+            o = ODPS(
+                os.getenv("ACCESS_ID"),
+                os.getenv("ACCESS_KEY"),
+                project,
+                os.getenv("ODPS_ENDPOINT"),
+            )
+        table = o.get_table(table)
+        with table.open_reader(partition) as reader:
+            table_size = reader.count
+    else:
+        table_size = odps_dataset_func.get_table_size(table_name)
     return table_size
 
 
@@ -114,6 +146,7 @@ class OdpsDataset(DatasetBase):
         save_interval=100,
         dtype=torch.float32,
         device="cpu",
+        prefetch_transform=None,
     ) -> None:
         """Initialize OdpsDataset with configuration parameters.
 
@@ -133,6 +166,7 @@ class OdpsDataset(DatasetBase):
             save_interval (int, optional): Interval for saving checkpoints. Defaults to 100.
             dtype (torch.dtype, optional): Data type for tensors. Defaults to torch.float32.
             device (str, optional): Device for tensor operations. Defaults to "cpu".
+            prefetch_transform (int, optional): Number of batches to prefetch for transform. Defaults to None.
 
         Note:
             The dataset automatically detects ODPS Open Storage availability and
@@ -153,13 +187,11 @@ class OdpsDataset(DatasetBase):
             save_interval,
             dtype,
             device,
+            prefetch_transform,
         )
         self._shuffle = shuffle
         self._table_sizes = []
         self._total_row_count = 0
-        self.hash_types = []
-        self.hash_buckets = []
-        self.hash_features = []
 
     def add_path(self, odps_table):
         """Add a single ODPS table to the dataset.
@@ -194,95 +226,6 @@ class OdpsDataset(DatasetBase):
         """
         for table in odps_tables:
             self.add_path(table)
-
-    def varlen_feature(self, name, hash_type=None, hash_bucket=0, trans_int8=False):
-        """Configure a variable-length (sparse) feature with optional hashing.
-
-        Variable-length features are columns that contain sequences or lists of values
-        with varying lengths across samples. These features can optionally be processed
-        with hash functions for dimensionality reduction and categorical encoding.
-
-        Args:
-            name (str): Name of the feature column in the ODPS tables.
-            hash_type (str, optional): Hash algorithm to use for the feature.
-                Supported values are "farm" (FarmHash) and "murmur" (MurmurHash).
-                If None, no hashing is applied. Defaults to None.
-            hash_bucket (int, optional): Size of the hash bucket (vocabulary size).
-                Only used when hash_type is specified. Defaults to 0.
-            trans_int8 (bool, optional): Whether to convert string data directly to
-                int8 tensors without hashing. Only effective when hash_type is None.
-                Defaults to False.
-
-        Example:
-            ```python
-            # Sparse feature with FarmHash for large vocabularies
-            dataset.varlen_feature(
-                "user_clicked_items", hash_type="farm", hash_bucket=1000000
-            )
-
-            # Sparse feature with MurmurHash for smaller vocabularies
-            dataset.varlen_feature(
-                "item_categories", hash_type="murmur", hash_bucket=50000
-            )
-
-            # Raw sparse feature without hashing (for pre-processed IDs)
-            dataset.varlen_feature("user_behavior_sequence")
-
-            # String feature converted to int8 (for text processing)
-            dataset.varlen_feature("review_tokens", trans_int8=True)
-            ```
-
-        Raises:
-            AssertionError: If hash_type is not "farm" or "murmur" when specified.
-
-        Note:
-            Hash functions are useful for handling large categorical vocabularies
-            by mapping them to a fixed-size space. FarmHash generally provides
-            better distribution properties, while MurmurHash is faster for smaller
-            vocabularies.
-        """
-        if name not in self._select_column:
-            self._select_column.append(name)
-            if hash_type:
-                assert hash_type in [
-                    "farm",
-                    "murmur",
-                ], "hash_type must be farm / murmur"
-                self.hash_features.append(name)
-                self.hash_buckets.append(hash_bucket)
-                self.hash_types.append(hash_type)
-            elif trans_int8:
-                self.hash_features.append(name)
-                self.hash_buckets.append(hash_bucket)
-                self.hash_types.append("no_hash")
-
-    def fixedlen_feature(self, name, default_value):
-        """Configure a fixed-length (dense) feature.
-
-        Fixed-length features are typically used for numerical data where each
-        sample has exactly one value, such as user age, item price, or ratings.
-
-        Args:
-            name (str): Name of the feature column in the ODPS table.
-            default_value (float): Default value to use when feature is missing.
-
-        Example:
-            ```python
-            # Numerical features with default values
-            dataset.fixedlen_feature("user_age", default_value=25.0)
-            dataset.fixedlen_feature("item_price", default_value=0.0)
-            dataset.fixedlen_feature("rating", default_value=3.0)
-            ```
-
-        Note:
-            Default values are important for handling missing data gracefully
-            and ensuring consistent tensor shapes across batches.
-        """
-        if name not in self._select_column:
-            self._select_column.append(name)
-        if name not in self._dense_column:
-            self._dense_column.append(name)
-            self._dense_default_value.append(default_value)
 
     def _shard_path(self, sub_id, sub_num):
         """Create table shards for distributed processing.

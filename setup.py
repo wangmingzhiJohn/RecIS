@@ -81,7 +81,15 @@ def get_main_extension():
         extra_link_args.append("-lfslib_c_api")
     delete_files = get_source_files(delete_dirs, "csrc", set(), False)
 
-    source_dirs = ["embedding", "platform", "distributed", "ops", "serialize", "utils"]
+    source_dirs = [
+        "embedding",
+        "platform",
+        "distributed",
+        "ops",
+        "serialize",
+        "utils",
+        "data",
+    ]
     source_files = get_source_files(source_dirs, "csrc", set(delete_files), True)
 
     gcc_args = ["-g", "-fopenmp"]

@@ -7,6 +7,7 @@ import torch.multiprocessing as mp
 from torch.utils.data import IterableDataset
 
 from recis.io.map_dataset import MapDataset
+from recis.io.prefetch_dataset import PrefetchDataset
 from recis.io.state_dataset import StateDataset
 from recis.io.wrap_end_dataset import WrapEndDataset
 from recis.nn.functional.ragged_ops import ragged_to_sparse
@@ -32,7 +33,26 @@ def is_string_dtype(arr):
     return arr.dtype.kind in {"U", "S", "O"}
 
 
-def _batch_convert(dense_column, ragged_format, dtype):
+def _convert_ragged_to_sparse():
+    def _wrapper_(input_data):
+        batch_list = []
+        for table, raw_batch in enumerate(input_data):
+            batch_list.append({})
+            for fn, data in raw_batch.items():
+                assert isinstance(data, RaggedTensor)
+                if len(data.offsets()) > 0:
+                    batch_list[table][fn] = ragged_to_sparse(
+                        data.values(), data.offsets()
+                    )
+                else:
+                    batch_list[table][fn] = data.values()
+        return batch_list
+
+    return _wrapper_
+
+
+def _convert_raw_to_ragged(dense_column, dtype):
+    # TODO(yzs): change this doc
     """Creates a batch conversion function for processing raw data into PyTorch tensors.
 
     This function returns a wrapper that converts raw batch data from the column IO
@@ -64,7 +84,7 @@ def _batch_convert(dense_column, ragged_format, dtype):
                         except Exception:
                             data[0][0] = data[0][0].astype("U")
                     batch_list[table][fn] = data[0]
-                elif fn in dense_column or fn == "_indicator":
+                elif fn in dense_column or fn.startswith("_indicator"):
                     values = torch.from_dlpack(data[0][0])
                     if torch.is_floating_point(values):
                         values = values.to(dtype)
@@ -77,17 +97,14 @@ def _batch_convert(dense_column, ragged_format, dtype):
                             values = values.to(dtype)
                         row_splits = [torch.from_dlpack(d) for d in data[1:][::-1]]
                         if len(row_splits) > 0:
-                            if ragged_format:
-                                dense_shape = tuple(
-                                    [row_splits[0].numel() - 1] + [-1] * len(row_splits)
-                                )
-                                batch_list[table][fn] = RaggedTensor(
-                                    values=values,
-                                    offsets=row_splits,
-                                    dense_shape=dense_shape,
-                                )
-                            else:
-                                batch_list[table][fn] = ragged_to_sparse(values, row_splits)
+                            dense_shape = tuple(
+                                [row_splits[0].numel() - 1] + [-1] * len(row_splits)
+                            )
+                            batch_list[table][fn] = RaggedTensor(
+                                values=values,
+                                offsets=row_splits,
+                                dense_shape=dense_shape,
+                            )
                         else:
                             batch_list[table][fn] = values
                     else:
@@ -107,18 +124,12 @@ def _batch_convert(dense_column, ragged_format, dtype):
                         if torch.is_floating_point(w_values):
                             w_values = w_values.to(dtype)
                         # w_row_splits = [torch.from_dlpack(d) for d in weight_data[1:][::-1]]
-                        if ragged_format:
-                            batch_list[table][fn] = RaggedTensor(
-                                values=values,
-                                offsets=row_splits,
-                                weight=w_values,
-                                dense_shape=dense_shape,
-                            )
-                        else:
-                            batch_list[table][fn] = ragged_to_sparse(values, row_splits)
-                            batch_list[table][fn + "_weight"] = ragged_to_sparse(
-                                values, row_splits
-                            )
+                        batch_list[table][fn] = RaggedTensor(
+                            values=values,
+                            offsets=row_splits,
+                            weight=w_values,
+                            dense_shape=dense_shape,
+                        )
         return batch_list
 
     return _wrapper_
@@ -192,6 +203,7 @@ class DatasetBase(IterableDataset):
         save_interval=100,
         dtype=torch.float32,
         device="cpu",
+        prefetch_transform=None,
     ) -> None:
         super().__init__()
         self._dataset = None
@@ -201,6 +213,7 @@ class DatasetBase(IterableDataset):
         self._read_threads_num = read_threads_num
         self._pack_threads_num = pack_threads_num
         self._prefetch = prefetch
+        self._prefetch_transform = prefetch_transform
         self._is_compressed = is_compressed
         self._drop_remainder = drop_remainder
         self._worker_slice_batch_num = worker_slice_batch_num
@@ -217,12 +230,13 @@ class DatasetBase(IterableDataset):
         self._dense_column = []
         self._dense_default_value = []
         self._transform_fn = transform_fn
-        if self._transform_fn is not None and not isinstance(
-            self._transform_fn, (tuple, list)
-        ):
+        if transform_fn is None:
+            self._transform_fn = []
+        elif not isinstance(self._transform_fn, (tuple, list)):
             self._transform_fn = [self._transform_fn]
         self._ragged_format = ragged_format
         self._map_funcs = []
+        self._transform_ragged_batch_funcs = []
         self._filter_funcs = []
 
         self._save_interval = save_interval
@@ -231,23 +245,70 @@ class DatasetBase(IterableDataset):
         self._shard_paths = None
         self._lock = mp.Lock()
         self._io_state = mp.Manager().dict()
+        self.hash_types = []
+        self.hash_buckets = []
+        self.hash_features = []
 
-    def varlen_feature(self, name):
-        """Defines a variable-length feature column.
+    def varlen_feature(self, name, hash_type=None, hash_bucket=0, trans_int8=False):
+        """Configure a variable-length (sparse) feature with optional hashing.
 
         Variable-length features are columns that contain sequences or lists of values
-        with varying lengths across samples. These are typically processed as RaggedTensors
-        or sparse tensors depending on the ragged_format setting.
+        with varying lengths across samples. These features can optionally be processed
+        with hash functions for dimensionality reduction and categorical encoding.
 
         Args:
-            name (str): Name of the feature column.
+            name (str): Name of the feature column in the ODPS tables.
+            hash_type (str, optional): Hash algorithm to use for the feature.
+                Supported values are "farm" (FarmHash) and "murmur" (MurmurHash).
+                If None, no hashing is applied. Defaults to None.
+            hash_bucket (int, optional): Size of the hash bucket (vocabulary size).
+                Only used when hash_type is specified. Defaults to 0.
+            trans_int8 (bool, optional): Whether to convert string data directly to
+                int8 tensors without hashing. Only effective when hash_type is None.
+                Defaults to False.
 
         Example:
-            >>> dataset.varlen_feature("item_sequence")
-            >>> dataset.varlen_feature("user_behavior_history")
+            ```python
+            # Sparse feature with FarmHash for large vocabularies
+            dataset.varlen_feature(
+                "user_clicked_items", hash_type="farm", hash_bucket=1000000
+            )
+
+            # Sparse feature with MurmurHash for smaller vocabularies
+            dataset.varlen_feature(
+                "item_categories", hash_type="murmur", hash_bucket=50000
+            )
+
+            # Raw sparse feature without hashing (for pre-processed IDs)
+            dataset.varlen_feature("user_behavior_sequence")
+
+            # String feature converted to int8 (for text processing)
+            dataset.varlen_feature("review_tokens", trans_int8=True)
+            ```
+
+        Raises:
+            AssertionError: If hash_type is not "farm" or "murmur" when specified.
+
+        Note:
+            Hash functions are useful for handling large categorical vocabularies
+            by mapping them to a fixed-size space. FarmHash generally provides
+            better distribution properties, while MurmurHash is faster for smaller
+            vocabularies.
         """
         if name not in self._select_column:
             self._select_column.append(name)
+            if hash_type:
+                assert hash_type in [
+                    "farm",
+                    "murmur",
+                ], "hash_type must be farm / murmur"
+                self.hash_features.append(name)
+                self.hash_buckets.append(hash_bucket)
+                self.hash_types.append(hash_type)
+            elif trans_int8:
+                self.hash_features.append(name)
+                self.hash_buckets.append(hash_bucket)
+                self.hash_types.append("no_hash")
 
     def fixedlen_feature(self, name, default_value):
         """Defines a fixed-length feature column with default values.
@@ -289,6 +350,9 @@ class DatasetBase(IterableDataset):
             >>> dataset.map(normalize_features)
         """
         self._map_funcs.append(map_func)
+
+    def transform_ragged_batch(self, func):
+        self._transform_ragged_batch_funcs.append(func)
 
     def filter(self, filter_func):
         """Adds a filtering function to the data processing pipeline.
@@ -462,12 +526,18 @@ class DatasetBase(IterableDataset):
             self._dataset = self._dataset.prefetch(self._prefetch)
         self._dataset = self._create_state_dataset(self._dataset, sub_id, sub_num)
         map_funcs = [
-            _batch_convert(self._dense_column, self._ragged_format, self._dtype)
-        ]
+            _convert_raw_to_ragged(self._dense_column, self._dtype)
+        ] + self._transform_ragged_batch_funcs
+        if not self._ragged_format:
+            map_funcs.append(_convert_ragged_to_sparse())
         map_funcs.extend(self._map_funcs)
         if self._transform_fn:
             map_funcs.extend(self._transform_fn)
         self._dataset = MapDataset(self._dataset, map_funcs=map_funcs)
+        if self._prefetch_transform:
+            self._dataset = PrefetchDataset(
+                self._dataset, buffer_size=self._prefetch_transform
+            )
         self._dataset = WrapEndDataset(self._dataset)
 
     def __iter__(self):

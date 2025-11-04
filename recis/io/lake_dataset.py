@@ -66,7 +66,8 @@ class LakeStreamDataset(DatasetBase):
         transform_fn=None,
         save_interval=100,
         dtype=torch.float32,
-        device="cpu,",
+        device="cpu",
+        prefetch_transform=None,
     ) -> None:
         """Initialize LakeStreamDataset with configuration parameters.
 
@@ -89,7 +90,8 @@ class LakeStreamDataset(DatasetBase):
             transform_fn (callable, optional): Data transformation function. Defaults to None.
             save_interval (int, optional): Interval for saving checkpoints. Defaults to 100.
             dtype (torch.dtype, optional): Data type for tensors. Defaults to torch.float32.
-            device (str, optional): Device for tensor operations. Defaults to "cpu,".
+            device (str, optional): Device for tensor operations. Defaults to "cpu".
+            prefetch_transform (int, optional): Number of batches to prefetch for transform. Defaults to None.
 
         Note:
             Lake-specific parameters (lake_use_prefetch, lake_prefetch_thread_num,
@@ -111,6 +113,7 @@ class LakeStreamDataset(DatasetBase):
             save_interval,
             dtype,
             device,
+            prefetch_transform,
         )
         self._lake_use_prefetch = lake_use_prefetch
         self._lake_prefetch_thread_num = lake_prefetch_thread_num
@@ -139,7 +142,9 @@ class LakeStreamDataset(DatasetBase):
             is_compressed=self._is_compressed,
             batch_size=self._batch_size,
             selected_columns=self._select_column,
-            hash_features=[],
+            hash_features=self.hash_features,
+            hash_types=self.hash_types,
+            hash_buckets=self.hash_buckets,
             dense_columns=self._dense_column,
             dense_defaults=self._dense_default_value,
             use_prefetch=self._lake_use_prefetch,

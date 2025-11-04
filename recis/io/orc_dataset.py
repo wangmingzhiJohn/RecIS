@@ -87,6 +87,7 @@ class OrcDataset(DatasetBase):
         save_interval=100,
         dtype=torch.float32,
         device="cpu",
+        prefetch_transform=None,
     ) -> None:
         """Initialize OrcDataset with configuration parameters.
 
@@ -106,6 +107,7 @@ class OrcDataset(DatasetBase):
             save_interval (int, optional): Interval for saving checkpoints. Defaults to 100.
             dtype (torch.dtype, optional): Data type for tensors. Defaults to torch.float32.
             device (str, optional): Device for tensor operations. Defaults to "cpu".
+            prefetch_transform (int, optional): Number of batches to prefetch for transform. Defaults to None.
 
         Raises:
             AssertionError: If is_compressed is True (not supported yet).
@@ -128,14 +130,12 @@ class OrcDataset(DatasetBase):
             save_interval,
             dtype,
             device,
+            prefetch_transform,
         )
         assert not is_compressed, "OrcDataset not support compressed data yet."
         self._shuffle = shuffle
         self._dir_sizes = []
         self._total_row_count = 0
-        self.hash_types = []
-        self.hash_buckets = []
-        self.hash_features = []
 
     def add_path(self, file_path):
         """Add a single file path to the dataset.
@@ -174,98 +174,6 @@ class OrcDataset(DatasetBase):
         """
         for file_path in file_paths:
             self.add_path(file_path)
-
-    def varlen_feature(self, name, hash_type=None, hash_bucket=0, trans_int8=False):
-        """Configure a variable-length (sparse) feature with optional hashing.
-
-        Variable-length features are columns that contain sequences or lists of values
-        with varying lengths across samples. These features can optionally be processed
-        with hash functions for dimensionality reduction and categorical encoding.
-
-        Args:
-            name (str): Name of the feature column in the ORC files.
-            hash_type (str, optional): Hash algorithm to use for the feature.
-                Supported values are "farm" (FarmHash) and "murmur" (MurmurHash).
-                If None, no hashing is applied. Defaults to None.
-            hash_bucket (int, optional): Size of the hash bucket (vocabulary size).
-                Only used when hash_type is specified. Defaults to 0.
-            trans_int8 (bool, optional): Whether to convert string data directly to
-                int8 tensors without hashing. Only effective when hash_type is None.
-                Defaults to False.
-
-        Example:
-
-        .. code-block:: python
-
-            # Sparse feature with FarmHash
-            dataset.varlen_feature(
-                "item_sequence", hash_type="farm", hash_bucket=100000
-            )
-
-            # Sparse feature with MurmurHash
-            dataset.varlen_feature(
-                "category_ids", hash_type="murmur", hash_bucket=50000
-            )
-
-            # Raw sparse feature without hashing
-            dataset.varlen_feature("user_tags")
-
-            # String feature converted to int8
-            dataset.varlen_feature("text_tokens", trans_int8=True)
-
-
-        Raises:
-            AssertionError: If hash_type is not "farm" or "murmur" when specified.
-
-        Note:
-            Hash functions are useful for handling large categorical vocabularies
-            by mapping them to a fixed-size space. FarmHash generally provides
-            better distribution properties, while MurmurHash is faster.
-        """
-        if name not in self._select_column:
-            self._select_column.append(name)
-            if hash_type:
-                assert hash_type in [
-                    "farm",
-                    "murmur",
-                ], "hash_type must be farm / murmur"
-                self.hash_features.append(name)
-                self.hash_buckets.append(hash_bucket)
-                self.hash_types.append(hash_type)
-            elif trans_int8:
-                self.hash_features.append(name)
-                self.hash_buckets.append(hash_bucket)
-                self.hash_types.append("no_hash")
-
-    def fixedlen_feature(self, name, default_value):
-        """Configure a fixed-length (dense) feature.
-
-        Fixed-length features are typically used for numerical data where each
-        sample has exactly one value, such as user age, item price, or ratings.
-
-        Args:
-            name (str): Name of the feature column.
-            default_value (float): Default value to use when feature is missing.
-
-        Example:
-
-        .. code-block:: python
-
-            # Numerical features with default values
-            dataset.fixedlen_feature("user_age", default_value=25.0)
-            dataset.fixedlen_feature("item_price", default_value=0.0)
-            dataset.fixedlen_feature("rating", default_value=3.0)
-
-
-        Note:
-            Default values are important for handling missing data gracefully
-            and ensuring consistent tensor shapes across batches.
-        """
-        if name not in self._select_column:
-            self._select_column.append(name)
-        if name not in self._dense_column:
-            self._dense_column.append(name)
-            self._dense_default_value.append(default_value)
 
     def _shard_path(self, sub_id, sub_num):
         """Create data shards for distributed processing.
