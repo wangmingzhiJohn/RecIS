@@ -279,6 +279,15 @@ class FeatureEngine(nn.Module):
             run_context = step.run(run_context)
 
         results = run_context.results
+        for feature_name in list(results.keys()):
+            if isinstance(results[feature_name], dict):
+                dict_value = results.pop(feature_name)
+                for sub_name, sub_value in dict_value.items():
+                    results[f"{feature_name}_{sub_name}"] = sub_value
         for feature_name, primary_feature in self._hash_cache_map.items():
-            results[feature_name] = results[primary_feature]
+            if isinstance(results[primary_feature], dict):
+                for sub_name, sub_re in results[primary_feature].items():
+                    results[f"{feature_name}_{sub_name}"] = sub_re
+            else:
+                results[feature_name] = results[primary_feature]
         return results

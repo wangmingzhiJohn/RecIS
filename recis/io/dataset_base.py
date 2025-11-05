@@ -229,6 +229,9 @@ class DatasetBase(IterableDataset):
         self._select_column = []
         self._dense_column = []
         self._dense_default_value = []
+        self.hash_types = []
+        self.hash_buckets = []
+        self.hash_features = []
         self._transform_fn = transform_fn
         if transform_fn is None:
             self._transform_fn = []
@@ -331,6 +334,37 @@ class DatasetBase(IterableDataset):
         if name not in self._dense_column:
             self._dense_column.append(name)
             self._dense_default_value.append(default_value)
+
+    def parse_from(self, io_confs):
+        """Parse and configure features from a collection of I/O configuration objects.
+
+        This method processes a collection of FeatureIOConf objects and automatically
+        configures the dataset with the appropriate feature definitions. It determines
+        whether each feature should be treated as variable-length (sparse) or fixed-length
+        (dense) based on the configuration and applies the corresponding setup.
+
+        The method serves as a bridge between the feature configuration system and
+        the dataset's feature registration methods, enabling batch configuration of
+        multiple features from structured configuration objects.
+
+        Args:
+            io_confs (Iterable[FeatureIOConf]): Collection of feature I/O configuration
+                objects. Each configuration object should contain the feature name,
+                format type (varlen/fixedlen), and associated parameters such as
+                hashing settings, dimensions, and data types.
+        """
+        for conf in io_confs:
+            if conf.varlen:
+                self.varlen_feature(
+                    name=conf.name,
+                    hash_type=conf.hash_type,
+                    hash_bucket=conf.hash_bucket_size,
+                    trans_int8=conf.trans_int,
+                )
+                logger.info(f"add varlen fea: {conf.name}")
+            else:
+                self.fixedlen_feature(conf.name, default_value=[0.0] * conf.dim)
+                logger.info(f"add fixlen fea: {conf.name}")
 
     def map(self, map_func):
         """Adds a mapping function to the data processing pipeline.

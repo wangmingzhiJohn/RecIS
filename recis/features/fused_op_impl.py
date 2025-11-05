@@ -152,7 +152,8 @@ class FusedBoundaryOP(_FusedOP):
         """
         outputs = []
         data_processors = [DataValueProcessor(data) for data in inputs]
-        fused_inputs = [dp.get_input_value() for dp in data_processors]
+        # TODO(yuhuan.zh) force change bucketize inputs to float32
+        fused_inputs = [dp.get_input_value().float() for dp in data_processors]
         fused_outputs = fused_bucketize_gpu(fused_inputs, self._cached_boundaries)
         for dp, output in zip(data_processors, fused_outputs):
             outputs.append(dp.get_output_value(output))
@@ -446,11 +447,13 @@ class FusedMultiHashOP(_FusedOP):
         self.fused_multi_primes = []
         self.fused_num_buckets = []
         self.fused_bucket_lens = []
+        self.fused_multi_prefix = []
         for op in self._ops:
             self.fused_multi_muls.append(op.multi_muls)
             self.fused_multi_primes.append(op.multi_primes)
             self.fused_num_buckets.append(op.num_buckets)
             self.fused_bucket_lens.append(op.bucket_lens)
+            self.fused_multi_prefix.append(op.prefix)
 
     def add_op(self, op):
         super().add_op(op)
@@ -494,15 +497,16 @@ class FusedMultiHashOP(_FusedOP):
 
         for i, data in enumerate(inputs):
             return_data = dict()
+            prefix = self.fused_multi_prefix[i]
             start_idx = sum(self.fused_bucket_lens[:i])
             for j in range(self.fused_bucket_lens[i]):
                 result_idx = start_idx + j
                 if isinstance(data, RaggedTensor):
-                    return_data[f"multi_hash_{j}"] = RaggedTensor(
+                    return_data[f"{prefix}_{j}"] = RaggedTensor(
                         fused_results[result_idx], data.offsets(), data.weight()
                     )
                 else:
-                    return_data[f"multi_hash_{j}"] = fused_results[result_idx]
+                    return_data[f"{prefix}_{j}"] = fused_results[result_idx]
             outputs.append(return_data)
 
         return outputs

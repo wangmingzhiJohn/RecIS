@@ -70,7 +70,12 @@ class DataValueProcessor:
             ValueError: If the data type is not supported.
         """
         if isinstance(self._data, RaggedTensor):
-            self._data.set_values(result)
+            self._data = RaggedTensor(
+                values=result,
+                offsets=self._data.offsets(),
+                weight=self._data.weight(),
+                dense_shape=self._data._dense_shape,
+            )
             return self._data
         elif isinstance(self._data, torch.Tensor):
             if self._data.is_sparse:
@@ -550,7 +555,7 @@ class IDMultiHash(_OP):
     multi_muls = [1, 3, 5, 7]
     multi_mods = [29, 47, 67, 83]
 
-    def __init__(self, num_buckets: List[int]):
+    def __init__(self, num_buckets: List[int], prefix: str = "multi_hash"):
         """Initialize the multi-hash operation.
 
         Args:
@@ -562,6 +567,7 @@ class IDMultiHash(_OP):
         """
         super().__init__()
         self.num_buckets = num_buckets
+        self.prefix = prefix
         self.bucket_lens = len(self.num_buckets)
         assert len(self.num_buckets) > 0, "num_buckets must be a list of 4 integers"
         multi_primes = [
@@ -598,7 +604,7 @@ class IDMultiHash(_OP):
             )
             return_data = dict()
             for i in range(self.bucket_lens):
-                return_data[f"multi_hash_{i}"] = RaggedTensor(
+                return_data[f"{self.prefix}_{i}"] = RaggedTensor(
                     new_values[i], x.offsets(), x.weight()
                 )
             return return_data
@@ -669,6 +675,7 @@ class Hash(_OP):
         Returns:
             RaggedTensor: Hashed output with reduced dimensionality.
         """
+        assert isinstance(x, RaggedTensor)
         if self.hash_type == "farm":
             output = farmhash_gpu([x.values()], [x.offsets()[-1].int()])
         else:
