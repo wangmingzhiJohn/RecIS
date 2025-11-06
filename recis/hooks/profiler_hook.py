@@ -5,7 +5,14 @@ from torch.profiler import ProfilerActivity, profile, schedule
 
 from recis.framework.filesystem import get_file_system
 from recis.hooks.hook import Hook
+from recis.info import is_internal_enabled
 from recis.utils.logger import Logger
+
+
+if is_internal_enabled():
+    from recis.utils.mos import Mos
+else:
+    Mos = None
 
 
 class ProfilerHook(Hook):
@@ -58,6 +65,9 @@ class ProfilerHook(Hook):
             with_flops=True,
         )
         self.logger = Logger("ProfilerHook")
+        if output_dir.startswith("model"):
+            assert Mos is not None, "Cannot import mos, check interneal version."
+            output_dir = Mos(output_dir).real_physical_path
         self.output_dir = output_dir
 
     def get_trace_handler(self):
