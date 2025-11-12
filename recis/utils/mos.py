@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from typing import Optional
 
 from nebula.mos import ModelCkpt, ModelVersion
 
@@ -289,7 +290,14 @@ class Mos:
         else:
             self.real_physical_path = render_uri_to_output_dir(uri)
 
-    def ckpt_update(self, ckpt_id, path, is_delete=False):
+    def ckpt_update(
+        self,
+        ckpt_id,
+        path,
+        is_delete=False,
+        label_key: Optional[str] = None,
+        label_value: Optional[str] = None,
+    ):
         """Create, update, or delete a model checkpoint.
 
         This method manages individual checkpoints within a model version,
@@ -302,7 +310,8 @@ class Mos:
                 Ignored when is_delete=True.
             is_delete (bool, optional): If True, delete the checkpoint.
                 If False, create or update it. Defaults to False.
-
+            label_key (str): Key for the label when saving to MOS. Defaults to None.
+            label_value (str): Value for the label when saving to MOS. Defaults to None.
         Raises:
             Exception: If checkpoint operation fails after 3 retry attempts.
 
@@ -338,3 +347,11 @@ class Mos:
                         time.sleep(5)
                     else:
                         raise e
+
+        if label_key is not None and label_value is not None:
+            assert isinstance(label_key, str) and isinstance(label_value, str)
+            assert not is_delete, "[MOS] label can not be set when ckpt is deleted"
+            logger.info(
+                f"[MOS] set label '{label_key}={label_value}' for ckpt_id={ckpt_id}"
+            )
+            ckpt.add_label(label_key=label_key, label_value=label_value)

@@ -129,7 +129,14 @@ class Saver:
                         out_f.write(inf.read())
                     fs.delete(filename)
 
-    def save(self, ckpt_id: str, shard_id: int = 0, shard_num: int = 1):
+    def save(
+        self,
+        ckpt_id: str,
+        shard_id: int = 0,
+        shard_num: int = 1,
+        label_key: Optional[str] = None,
+        label_value: Optional[str] = None,
+    ):
         """Save a complete checkpoint with the given ID.
 
         This method saves all registered components including model parameters,
@@ -140,6 +147,8 @@ class Saver:
             ckpt_id (str): Unique identifier for this checkpoint.
             shard_id (int): Shard ID for distributed saving. Defaults to 0.
             shard_num (int): Total number of shards. Defaults to 1.
+            label_key (str): Key for the label when saving to MOS. Defaults to None.
+            label_value (str): Value for the label when saving to MOS. Defaults to None.
         """
         ckpt_path = os.path.join(self._output_dir, ckpt_id)
         fs = get_file_system(ckpt_path)
@@ -216,7 +225,12 @@ class Saver:
                         ckpt_id=ckpt_id_to_remove, path=ckpt_path, is_delete=True
                     )
             if self._mos:
-                self._mos.ckpt_update(ckpt_id=ckpt_id, path=ckpt_path)
+                self._mos.ckpt_update(
+                    ckpt_id=ckpt_id,
+                    path=ckpt_path,
+                    label_key=label_key,
+                    label_value=label_value,
+                )
         torch.cuda.synchronize()
 
     def save_sparse_params(
@@ -495,10 +509,10 @@ class CheckpointManager:
             ckpt_id = f"ckpt_{self._global_step}"
             self._saver.save(ckpt_id, self._rank, self._shard_num)
 
-    def save(self):
+    def save(self, label_key: Optional[str] = None, label_value: Optional[str] = None):
         """Save a checkpoint with automatic ID generation."""
         ckpt_id = f"ckpt_{self._global_step}"
-        self._saver.save(ckpt_id, self._rank, self._shard_num)
+        self._saver.save(ckpt_id, self._rank, self._shard_num, label_key, label_value)
 
     def load_model_bank(self, model_bank_conf: Optional[dict]):
         if not model_bank_conf:
