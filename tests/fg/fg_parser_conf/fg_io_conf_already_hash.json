@@ -2,7 +2,7 @@
   "s_nid_pv30_c2c":
   {
     "name": "s_nid_pv30_c2c",
-    "varlen": true,
+    "varlen": false,
     "hash_type": null,
     "hash_bucket_size": 0,
     "trans_int": false,
@@ -11,7 +11,7 @@
   "s_nid_ipv30_c2c":
   {
     "name": "s_nid_ipv30_c2c",
-    "varlen": true,
+    "varlen": false,
     "hash_type": null,
     "hash_bucket_size": 0,
     "trans_int": false,

@@ -732,9 +732,8 @@ class FGParser:
         Returns:
             bool: True if the feature should use sparse format, False otherwise.
         """
-        sparse_format = (
-            conf.is_sparse or conf.is_seq or (not conf.gen_value_type == "idle")
-        )
+        # cannot convert bucketize features to sparse
+        sparse_format = conf.is_sparse or conf.is_seq
         return sparse_format
 
     def _get_io_hash_args(self, conf):

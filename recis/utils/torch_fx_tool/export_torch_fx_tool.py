@@ -2,7 +2,7 @@ import copy
 import json
 import os
 import pickle
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -42,7 +42,6 @@ if torch_minor_version is not None and (torch_major_version, torch_minor_version
     # Remove this once RTP adds support for torch.export.load in PyTorch versions above 2.7.
 
     import zipfile
-    from typing import Any, Optional
 
     from torch._export.serde.schema import SCHEMA_VERSION
     from torch._export.serde.serialize import SerializedArtifact, serialize
