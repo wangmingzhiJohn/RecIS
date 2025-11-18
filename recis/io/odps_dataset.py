@@ -1,9 +1,6 @@
-import os
-
 import column_io.dataset.dataset as column_io_dataset
 import torch
 from column_io.dataset.file_sharding import OdpsTableSharding
-from odps import ODPS
 
 
 try:
@@ -52,36 +49,7 @@ def get_table_size(table_name):
         print(f"Table has {size} rows")
         ```
     """
-    if is_turn_on_odps_open_storage():
-        # When open storage is turned on, the table size may be got before creating session,
-        # which will lead to failure. So we use ODPS API to get table size.
-        if "?" in table_name:
-            table_name = table_name.split("?")[0]
-        parts = table_name.split("/")
-        project = parts[2]
-        table = parts[4]
-        partition = parts[5]
-        if int(os.getenv("NOTEBOOK_CONTAINER", "0")) == 1:
-            o = ODPS(
-                os.getenv("ACCESS_ID"),
-                os.getenv("ACCESS_KEY"),
-                project,
-                os.getenv("ODPS_ENDPOINT"),
-                # need to set tunnel_endpoint when running locally
-                tunnel_endpoint=os.getenv("tunnel_end_point"),
-            )
-        else:
-            o = ODPS(
-                os.getenv("ACCESS_ID"),
-                os.getenv("ACCESS_KEY"),
-                project,
-                os.getenv("ODPS_ENDPOINT"),
-            )
-        table = o.get_table(table)
-        with table.open_reader(partition) as reader:
-            table_size = reader.count
-    else:
-        table_size = odps_dataset_func.get_table_size(table_name)
+    table_size = odps_dataset_func.get_table_size(table_name)
     return table_size
 
 
