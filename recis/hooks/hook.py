@@ -31,58 +31,34 @@ class Hook:
         >>> trainer.add_hook(custom_hook)
     """
 
-    def before_train(self):
-        """Called before training starts.
-
-        This method is invoked once at the beginning of the training process,
-        before any training steps are executed. Use this for initialization
-        logic that needs to happen before training begins.
-        """
-
-    def after_train(self):
-        """Called after training completes.
-
-        This method is invoked once at the end of the training process,
-        after all training steps have been completed. Use this for cleanup
-        or final processing logic.
-        """
-
-    def before_evaluate(self):
-        """Called before evaluation starts.
-
-        This method is invoked before each evaluation phase begins.
-        Use this for setup logic specific to evaluation.
-        """
-
-    def after_evaluate(self):
-        """Called after evaluation completes.
-
-        This method is invoked after each evaluation phase ends.
-        Use this for processing evaluation results or cleanup.
-        """
-
-    def before_epoch(self):
+    def before_epoch(self, is_train=True, *args, **kwargs):
         """Called before each training epoch starts.
 
         This method is invoked at the beginning of each training epoch,
         before any steps in that epoch are executed.
         """
 
-    def after_epoch(self):
+    def after_epoch(self, is_train=True, *args, **kwargs):
         """Called after each training epoch completes.
 
         This method is invoked at the end of each training epoch,
         after all steps in that epoch have been executed.
         """
 
-    def before_step(self):
+    def before_window(self, is_train=True, *args, **kwargs):
+        """Called before each window."""
+
+    def after_window(self, is_train=True, *args, **kwargs):
+        """Called after each window."""
+
+    def before_step(self, is_train=True, *args, **kwargs):
         """Called before each training step.
 
         This method is invoked before each individual training step
         is executed. Use this for per-step setup logic.
         """
 
-    def after_step(self):
+    def after_step(self, is_train=True, *args, **kwargs):
         """Called after each training step completes.
 
         This method is invoked after each individual training step
@@ -90,7 +66,10 @@ class Hook:
         such as logging metrics or updating statistics.
         """
 
-    def end(self):
+    def start(self, is_train=True, *args, **kwargs):
+        """Called at the very start of the training process."""
+
+    def end(self, is_train=True, *args, **kwargs):
         """Called at the very end of the training process.
 
         This method is invoked for final cleanup operations,
@@ -98,5 +77,5 @@ class Hook:
         It is called after all other hook methods have completed.
         """
 
-    def after_data(self, data):
+    def after_data(self, is_train=True, *args, **kwargs):
         """Called after each data batch."""

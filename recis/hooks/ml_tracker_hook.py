@@ -125,7 +125,7 @@ class MLTrackerHook(Hook):
         super().__init__()
         self.tracker = ml_tracker.init(project=project, name=name, id=id, config=config)
 
-    def after_step(self, metric, global_step):
+    def after_step(self, global_step=0, is_train=True, *args, **kwargs):
         """Called after each training step to log accumulated metrics.
 
         This method retrieves all data from the trace map and logs it to the
@@ -133,7 +133,6 @@ class MLTrackerHook(Hook):
         the trace map is cleared to prepare for the next step.
 
         Args:
-            metric: Training metrics from the current step (unused in this implementation).
             global_step (int): Global training step number for timestamping the logged data.
 
         Note:
@@ -144,7 +143,7 @@ class MLTrackerHook(Hook):
         self.tracker.log(data, global_step)
         clear_trace_map()
 
-    def end(self):
+    def end(self, is_train=True, *args, **kwargs):
         """Called at the end of training to finalize the ML tracker session.
 
         This method properly closes the ML tracker session, ensuring all

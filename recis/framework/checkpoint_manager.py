@@ -1,12 +1,14 @@
 import os
 from collections import OrderedDict
-from typing import Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 import torch
 
 from recis.framework.filesystem import get_file_system
 from recis.info import is_internal_enabled
 from recis.nn.modules.hashtable import split_sparse_dense_state_dict
+from recis.optim.sparse_optim import SparseOptimizer
 from recis.serialize import Loader as SLoader, Saver as SSaver
 from recis.utils.logger import Logger
 
@@ -19,6 +21,18 @@ else:
     PanguException = None
     Mos = None
 logger = Logger(__name__)
+
+
+@dataclass
+class SaverOptions:
+    model: torch.nn.Module
+    sparse_optim: Optional[SparseOptimizer]
+    output_dir: Optional[str] = None
+    model_bank: Optional[list] = None
+    max_keep: int = 1
+    concurrency: int = 4
+    # TODO(yuhuan.zh) enable param not save
+    params_not_save: Optional[Dict[str, torch.Tensor]] = None
 
 
 class Saver:
@@ -46,11 +60,7 @@ class Saver:
 
     def __init__(
         self,
-        model: torch.nn.Module,
-        sparse_optim=None,
-        output_dir: str = "./",
-        max_keep: int = 1,
-        concurrency: int = 4,
+        options: SaverOptions,
     ):
         """Initialize the checkpoint saver.
 
@@ -61,28 +71,31 @@ class Saver:
             max_keep (int): Maximum number of checkpoints to keep. Defaults to 1.
             concurrency (int): Number of concurrent save operations. Defaults to 4.
         """
-        self._model = model
+        self._shard_id = int(os.environ.get("RANK", 0))
+        self._shard_num = int(os.environ.get("WORLD_SIZE", 1))
+        self._model = options.model
         self._sparse_state_dict, self._dense_state_dict = split_sparse_dense_state_dict(
-            model.state_dict()
+            self._model.state_dict()
         )
         self._checkpoint_file = "checkpoint"
         self._checkpoint_version_list = []
-        self._max_keep = max_keep
+        self._max_keep = options.max_keep
         self._extra_save_dict = {}
 
         self._mos = None
-        self._output_dir = output_dir
-        if output_dir.startswith("model"):
-            assert Mos is not None, "Cannot import mos, check interneal version."
-            self._mos = Mos(output_dir)
+        self._output_dir = options.output_dir
+        if self._output_dir.startswith("model"):
+            assert Mos is not None, "Cannot import mos, check internal version."
+            self._mos = Mos(self._output_dir)
             self._output_dir = self._mos.real_physical_path
+        self._model_bank = options.model_bank
 
-        self._sparse_optim = sparse_optim
+        self._sparse_optim = options.sparse_optim
         self._sparse_optim_state = {}
-        if sparse_optim is not None:
-            self._sparse_optim_state = sparse_optim.state_dict()
+        if self._sparse_optim is not None:
+            self._sparse_optim_state = self._sparse_optim.state_dict()
             self._sparse_state_dict.update(self._sparse_optim_state)
-        self._concurrency = concurrency
+        self._concurrency = options.concurrency
         self._io_state = {}
 
     def register_io_state(self, name, obj: object):
@@ -132,8 +145,6 @@ class Saver:
     def save(
         self,
         ckpt_id: str,
-        shard_id: int = 0,
-        shard_num: int = 1,
         label_key: Optional[str] = None,
         label_value: Optional[str] = None,
     ):
@@ -145,8 +156,6 @@ class Saver:
 
         Args:
             ckpt_id (str): Unique identifier for this checkpoint.
-            shard_id (int): Shard ID for distributed saving. Defaults to 0.
-            shard_num (int): Total number of shards. Defaults to 1.
             label_key (str): Key for the label when saving to MOS. Defaults to None.
             label_value (str): Value for the label when saving to MOS. Defaults to None.
         """
@@ -161,8 +170,8 @@ class Saver:
                     pass
         if len(self._sparse_state_dict.keys()) > 0:
             self.save_sparse_params(
-                shard_id,
-                shard_num,
+                self._shard_id,
+                self._shard_num,
                 ckpt_path,
                 self._sparse_state_dict,
                 self._concurrency,
@@ -171,9 +180,11 @@ class Saver:
         for io_name, io in self._io_state.items():
             io_states[io_name] = io.dump_io_state()
         if io_states:
-            with fs.open(os.path.join(ckpt_path, f"io_state_{shard_id}.pt"), "wb") as f:
+            with fs.open(
+                os.path.join(ckpt_path, f"io_state_{self._shard_id}.pt"), "wb"
+            ) as f:
                 torch.save(io_states, f=f)
-        if shard_id == 0:
+        if self._shard_id == 0:
             if len(self._dense_state_dict.keys()) > 0:
                 self.save_dense_params(ckpt_path, self._dense_state_dict)
             if len(self._extra_save_dict.keys()) > 0:
@@ -187,7 +198,7 @@ class Saver:
                     torch.save(extra_save, f=f)
                 if io_states:
                     with fs.open(os.path.join(ckpt_path, "io_state_count"), "w+") as f:
-                        f.write(f"{shard_num}")
+                        f.write(f"{self._shard_num}")
             with fs.open(
                 os.path.join(self._output_dir, self._checkpoint_file), "a+"
             ) as out_f:
@@ -346,6 +357,8 @@ class Saver:
         for key, value in self._extra_save_dict.items():
             if hasattr(value, "load_state_dict"):
                 value.load_state_dict(extra_data[key])
+            elif isinstance(value, torch.Tensor):
+                value.copy_(extra_data[key])
             else:
                 value = extra_data[key]
             self._extra_save_dict[key] = value
@@ -361,7 +374,6 @@ class Saver:
         ckpt_path: Optional[str] = None,
         ckpt_id: Optional[str] = None,
         load_conf: Optional[dict] = None,
-        shard_id: int = 0,
         direct_path=False,
     ):
         if load_conf is None:
@@ -389,9 +401,9 @@ class Saver:
                 else:
                     logger.info(f"Checkpoint not found in {ckpt_path}")
                     return
-            logger.info(f"Load checkpoint conf {load_conf} from {ckpt_path}")
             ckpt_path = os.path.join(ckpt_path, ckpt_id)
-        self.load_by_config(ckpt_path, load_conf, shard_id)
+            logger.info(f"Load checkpoint conf {load_conf} from {ckpt_path}")
+        self.load_by_config(ckpt_path, load_conf, self._shard_id)
 
     def load_by_config(
         self, ckpt_path: str, load_conf: Optional[dict] = None, shared_id: int = 0
@@ -442,97 +454,20 @@ class Saver:
         else:
             return None
 
+    def restore(self):
+        # load model bank
+        if self._model_bank:
+            for mbc in self._model_bank:
+                path = mbc["path"]
+                if path is not None and path.startswith("model."):
+                    assert Mos is not None, (
+                        "Cannot import mos, check interneal version."
+                    )
+                    path = Mos(path, True).real_physical_path
+                self.load(ckpt_path=path, load_conf=mbc, direct_path=True)
+        # load outputdir
+        self.load()
 
-class CheckpointManager:
-    """High-level checkpoint manager for coordinating checkpoint operations.
-
-    The CheckpointManager provides a high-level interface for managing checkpoints
-    during training, including automatic saving at intervals, loading from model banks,
-    and coordinating with the training loop.
-
-    Example:
-        >>> checkpoint_manager = CheckpointManager(saver=saver, save_interval=1000)
-        >>> # During training loop
-        >>> checkpoint_manager.step()  # Call after each training step
-        >>> # Automatic save will occur every save_interval steps
-    """
-
-    def __init__(
-        self,
-        saver: Saver,
-        save_interval: int,
-        save_every_n_windows: Optional[int] = None,
-    ) -> None:
-        """Initialize the checkpoint manager.
-
-        Args:
-            saver (Saver): The saver instance to use for checkpoint operations.
-            save_interval (int): Number of steps between automatic saves.
-            save_every_n_windows (int): Number of windows to save when using window io.
-                If this is set, save_interval will be ignored.
-        """
-        self._saver = saver
-        self._global_step = torch.scalar_tensor(0, dtype=torch.int64)
-        self._rank = int(os.environ.get("RANK", 0))
-        self._shard_num = int(os.environ.get("WORLD_SIZE", 1))
-        self._save_interval = save_interval
-        self._save_every_n_windows = save_every_n_windows
-        self._window_step_counter = 0
-        if not self._saver.get_extra_data("global_step"):
-            self._saver.register_for_checkpointing("global_step", self._global_step)
-
-    @property
-    def save_interval(self):
-        return self._save_interval
-
-    def register_for_checkpointing(self, name, obj: object):
-        self._saver.register_for_checkpointing(name, obj)
-
-    def step(self):
-        """Increment step counter and save checkpoint if interval is reached.
-
-        This method should be called after each training step. It automatically
-        saves a checkpoint when the step count reaches the save interval.
-        """
-        self._global_step += 1
-        if (
-            self._save_every_n_windows is None
-            and self._global_step % self._save_interval == 0
-        ):
-            ckpt_id = f"ckpt_{self._global_step}"
-            self._saver.save(ckpt_id, self._rank, self._shard_num)
-
-    def window_step(self):
-        """Similar to step, but only for window io."""
-        self._window_step_counter += 1
-        if self._window_step_counter % self._save_every_n_windows == 0:
-            ckpt_id = f"ckpt_{self._global_step}"
-            self._saver.save(ckpt_id, self._rank, self._shard_num)
-
-    def save(self, label_key: Optional[str] = None, label_value: Optional[str] = None):
-        """Save a checkpoint with automatic ID generation."""
-        ckpt_id = f"ckpt_{self._global_step}"
-        self._saver.save(ckpt_id, self._rank, self._shard_num, label_key, label_value)
-
-    def load_model_bank(self, model_bank_conf: Optional[dict]):
-        if not model_bank_conf:
-            return
-        for mbc in model_bank_conf:
-            path = mbc["path"]
-            if path is not None and path.startswith("model."):
-                assert Mos is not None, "Cannot import mos, check interneal version."
-                path = Mos(path, True).real_physical_path
-            self._saver.load(
-                ckpt_path=path, load_conf=mbc, shard_id=self._rank, direct_path=True
-            )
-
-    def restore(self, global_step: Optional[int] = None):
-        if global_step is None:
-            ckpt_id = None
-        else:
-            ckpt_id = f"ckpt_{global_step}"
-        self._saver.load(ckpt_id=ckpt_id, shard_id=self._rank)
-        global_step = self._saver.get_extra_data("global_step")
-        if global_step is not None:
-            self._global_step = global_step
-        return self._global_step
+    def update_load(self):
+        # load dynamic model banks
+        pass

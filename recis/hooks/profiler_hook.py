@@ -107,7 +107,7 @@ class ProfilerHook(Hook):
 
         return default_trace_handler
 
-    def after_step(self, *args, **kwargs):
+    def after_step(self, is_train=True, *args, **kwargs):
         """Called after each training step to advance the profiler.
 
         This method is invoked after each training step to advance the profiler's

@@ -38,7 +38,7 @@ class HashTableFilterHook(Hook):
                 # ... training logic ...
 
                 # Hook automatically manages filtering
-                filter_hook.after_step(None, global_step)
+                filter_hook.after_step(global_step=global_step)
 
                 global_step += 1
     """
@@ -79,7 +79,7 @@ class HashTableFilterHook(Hook):
         """
         self.filter_interval = interval
 
-    def after_step(self, _, gstep):
+    def after_step(self, global_step=0, is_train=True, *args, **kwargs):
         """Execute filter management operations after each training step.
 
         This method is called after each training step to:
@@ -90,7 +90,7 @@ class HashTableFilterHook(Hook):
 
         Args:
             _ (Any): Unused parameter (typically model or trainer instance).
-            gstep (Union[int, torch.Tensor]): Current global training step.
+            global_step (Union[int, torch.Tensor]): Current global training step.
                 Can be either an integer or a tensor containing the step value.
 
         Note:
@@ -100,11 +100,13 @@ class HashTableFilterHook(Hook):
         """
         if self.last_filter_step == 0:
             self.last_filter_step = (
-                gstep.item() if isinstance(gstep, torch.Tensor) else gstep
+                global_step.item()
+                if isinstance(global_step, torch.Tensor)
+                else global_step
             )
         exec_filter = (
             self.filter_interval is not None
-            and gstep - self.last_filter_step >= self.filter_interval
+            and global_step - self.last_filter_step >= self.filter_interval
         )
         for hooks in self.ht_filters.values():
             for ft in hooks.values():
@@ -113,5 +115,7 @@ class HashTableFilterHook(Hook):
                     ft.do_filter()
         if exec_filter:
             self.last_filter_step = (
-                gstep.item() if isinstance(gstep, torch.Tensor) else gstep
+                global_step.item()
+                if isinstance(global_step, torch.Tensor)
+                else global_step
             )

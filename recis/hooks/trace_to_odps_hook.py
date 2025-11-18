@@ -429,7 +429,7 @@ class TraceToOdpsHook(Hook):
                 alive = False
         return alive
 
-    def after_step(self, *args, **kw):
+    def after_step(self, is_train=True, *args, **kw):
         """Called after each training step to upload accumulated trace data.
 
         This method retrieves all data from the trace map and sends it to
@@ -453,7 +453,7 @@ class TraceToOdpsHook(Hook):
         self.queue.put(data)
         clear_trace_map()
 
-    def end(self):
+    def end(self, is_train=True, *args, **kwargs):
         """Called at the end of training to properly shutdown writer processes.
 
         This method sends shutdown signals to all writer processes and waits

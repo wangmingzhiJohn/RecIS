@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -12,9 +12,15 @@ from accelerate import (
 from torch import nn
 from torch.utils.data import Dataset
 
-from recis.framework.checkpoint_manager import CheckpointManager, Saver
+from recis.framework.checkpoint_manager import Saver, SaverOptions
 from recis.framework.metrics import get_global_metrics
 from recis.hooks import Hook, LoggerHook
+from recis.hooks.checkpoint_hooks import (
+    CheckpointLoadArguments,
+    CheckpointLoadHook,
+    CheckpointSaveArguments,
+    CheckpointSaveHook,
+)
 from recis.optim import sparse_optim
 from recis.utils.data_utils import copy_data_to_device
 from recis.utils.logger import Logger
@@ -62,6 +68,14 @@ class TrainingArguments:
     max_to_keep: int = 5
     save_concurrency_per_rank: int = 4
     save_every_n_windows: int = 1
+    save_every_n_epochs: Optional[int] = None
+    load_update_steps: Optional[int] = None
+    load_update_windows: Optional[int] = 1
+    load_update_epochs: Optional[int] = None
+    params_not_save: Optional[Dict[str, torch.Tensor]] = None
+    saver_option: Optional[SaverOptions] = None
+    ckpt_save_arg: Optional[CheckpointSaveArguments] = None
+    ckpt_load_arg: Optional[CheckpointLoadArguments] = None
 
 
 class Trainer:
@@ -141,6 +155,7 @@ class Trainer:
         ] = (None, None),
         sparse_optimizer: Optional[sparse_optim.SparseOptimizer] = None,
         data_to_cuda: bool = False,
+        saver: Optional[Saver] = None,
         **kwargs,
     ) -> None:
         """Initialize the Trainer with model, datasets, and training configuration.
@@ -190,44 +205,68 @@ class Trainer:
             # This interface is preserved for users who wish to manage gradient accumulation manually.
             self.sparse_optimizer.set_grad_accum_steps(1)
         self._global_step = torch.scalar_tensor(0, dtype=torch.int64)
-        self.build_checkpoint_manager(model, args)
-        self.has_restore = False
-
-        self.hooks.append(LoggerHook(self.args.log_steps))
+        self._epoch = torch.scalar_tensor(0, dtype=torch.int64)
+        self.saver = self.init_saver(model, args, saver)
         self.stop_state = torch.scalar_tensor(0, dtype=torch.int64).cuda()
+        self.init_hooks()
 
-    def build_checkpoint_manager(self, model, args):
-        saver = self.build_saver(model, args)
-        save_every_n_windows = None
+    def init_saver(self, model, args, saver):
+        saver = self.build_saver(model, args, saver)
         if self.train_dataset is not None:
             saver.register_io_state("train_io", self.train_dataset)
             if hasattr(self.train_dataset, "_window_paths"):
                 saver.register_for_checkpointing("train_window_io", self.train_dataset)
-                save_every_n_windows = args.save_every_n_windows
         if self.eval_dataset is not None and hasattr(
             self.eval_dataset, "_window_paths"
         ):
             saver.register_io_state("eval_io", self.eval_dataset)
             saver.register_for_checkpointing("eval_window_io", self.eval_dataset)
-            save_every_n_windows = args.save_every_n_windows
         if self.dense_optimizer is not None:
             saver.register_for_checkpointing("dense_optimizer", self.dense_optimizer)
-
-        self.checkpoint_manager = CheckpointManager(
-            saver=saver,
-            save_interval=args.save_steps,
-            save_every_n_windows=save_every_n_windows,
-        )
-
-    def build_saver(self, model, args):
-        saver = Saver(
-            model,
-            self.sparse_optimizer,
-            output_dir=args.output_dir,
-            max_keep=args.max_to_keep,
-            concurrency=args.save_concurrency_per_rank,
-        )
+        if not saver.get_extra_data("global_step"):
+            saver.register_for_checkpointing("global_step", self._global_step)
+        if not saver.get_extra_data("train_epoch"):
+            saver.register_for_checkpointing("train_epoch", self._epoch)
         return saver
+
+    def build_saver(self, model, args, saver):
+        if saver is None:
+            saver_option = args.saver_option
+            if saver_option is None:
+                saver_option = SaverOptions(
+                    model,
+                    self.sparse_optimizer,
+                    args.output_dir,
+                    args.model_bank,
+                    args.max_to_keep,
+                    args.save_concurrency_per_rank,
+                    args.params_not_save,
+                )
+            saver = Saver(saver_option)
+        return saver
+
+    def init_hooks(self):
+        self.hooks.append(LoggerHook(self.args.log_steps))
+        ckpt_save_arg = CheckpointSaveArguments(
+            self.args.save_steps,
+            self.args.save_every_n_windows,
+            self.args.save_every_n_epochs,
+        )
+        self.hooks.append(
+            CheckpointSaveHook(
+                self.saver, self._global_step, self._epoch, ckpt_save_arg
+            )
+        )
+        ckpt_load_arg = CheckpointLoadArguments(
+            self.args.load_update_steps,
+            self.args.load_update_windows,
+            self.args.load_update_epochs,
+        )
+        self.hooks.append(
+            CheckpointLoadHook(
+                self.saver, self._global_step, self._epoch, ckpt_load_arg
+            )
+        )
 
     def add_hooks(self, hooks: List[Hook]):
         """Add multiple hooks to the trainer.
@@ -246,17 +285,6 @@ class Trainer:
         """
         self.hooks.append(hook)
 
-    def restore(self):
-        """Restore model and training state from checkpoints.
-
-        This method loads the latest checkpoint if available and restores
-        the model state, optimizer state, and training progress.
-        """
-        if not self.has_restore:
-            self.checkpoint_manager.load_model_bank(self.args.model_bank)
-            self._global_step = self.checkpoint_manager.restore()
-            self.has_restore = True
-
     def train(self, train_steps=None):
         """Execute the training loop.
 
@@ -264,35 +292,24 @@ class Trainer:
             train_steps (Optional[int]): Override for number of training steps.
                                        If None, uses args.train_steps.
         """
-        self.restore()
-        for epoch in range(self.args.train_epoch):
-            self._train_loop(
+        for hook in self.hooks:
+            hook.start(is_train=True)
+        if hasattr(self.train_dataset, "_window_paths"):
+            train_loop_fn = self._train_loop_by_window
+        else:
+            train_loop_fn = self._train_loop
+        while self._epoch < self.args.train_epoch:
+            for hook in self.hooks:
+                hook.before_epoch(is_train=True)
+            train_loop_fn(
                 self.args.train_steps if train_steps is None else train_steps,
-                epoch=epoch,
+                epoch=self._epoch,
             )
             self.train_dataset.reset()
+            for hook in self.hooks:
+                hook.after_epoch(is_train=True)
         for hook in self.hooks:
-            hook.end()
-
-    def train_and_evaluate(self, epochs=1, train_steps=None, eval_steps=None):
-        """Execute alternating training and evaluation loops.
-
-        Args:
-            epochs (int): Number of epochs to train. Defaults to 1.
-            train_steps (Optional[int]): Override for number of training steps per epoch.
-            eval_steps (Optional[int]): Override for number of evaluation steps.
-        """
-        self.restore()
-        for epoch in range(epochs):
-            self._train_loop(
-                self.args.train_steps if train_steps is None else train_steps,
-                epoch=epoch,
-            )
-            self.evaluate(eval_steps=eval_steps)
-            self.train_dataset.reset()
-            self.eval_dataset.reset()
-        for hook in self.hooks:
-            hook.end()
+            hook.end(is_train=True)
 
     def evaluate(self, eval_steps=None):
         """Execute the evaluation loop.
@@ -301,47 +318,54 @@ class Trainer:
             eval_steps (Optional[int]): Override for number of evaluation steps.
                                       If None, evaluates on full dataset.
         """
-        self.restore()
-        if hasattr(self.eval_dataset, "_window_paths"):
-            iterator = self.get_new_window_iter(self.eval_dataset)
-        else:
-            iterator = iter(self.eval_dataset)
-        lstep = 0
-        while True:
-            if eval_steps is not None and lstep >= eval_steps:
-                break
-            need_break = False
-            stop_flag, data = next(iterator)
-            if hasattr(self.eval_dataset, "_window_paths"):
-                # if window io, sync the stop flag
-                stop_flag = self.sync_exit_flag(stop_flag)
-                # if stop_flag is True, try to get the next window
-                if stop_flag:
-                    iterator = self.get_new_window_iter(self.eval_dataset)
-                    # if iterator is None, break
-                    if iterator is None:
-                        need_break = True
-            elif stop_flag:
-                need_break = True
-            need_break = self.sync_exit_flag(need_break)
-            if need_break:
-                break
-            if stop_flag:  # only window io could hit this
-                continue
-            if self.data_to_cuda:
-                data = copy_data_to_device(data, "cuda")
-            for hook in self.hooks:
-                hook.after_data(data)
-            metrics = {}
-            self.model.eval()
-            with torch.no_grad():
-                self.model(data)
-            metrics.update(get_global_metrics())
-            for hook in self.hooks:
-                hook.after_step(metrics, self._global_step)
-            lstep += 1
         for hook in self.hooks:
-            hook.end()
+            hook.start(is_train=False)
+        if hasattr(self.eval_dataset, "_window_paths"):
+            eval_loop_fn = self._eval_loop_by_window
+        else:
+            eval_loop_fn = self._eval_loop
+        for hook in self.hooks:
+            hook.before_epoch(is_train=False)
+        eval_loop_fn(
+            self.args.eval_steps if eval_steps is None else eval_steps,
+        )
+        for hook in self.hooks:
+            hook.after_epoch(is_train=False)
+            hook.end(is_train=False)
+
+    def train_and_evaluate(self, train_steps=None, eval_steps=None):
+        """Execute alternating training and evaluation loops.
+
+        Args:
+            train_steps (Optional[int]): Override for number of training steps per epoch.
+            eval_steps (Optional[int]): Override for number of evaluation steps.
+        """
+        for hook in self.hooks:
+            hook.start(is_train=True)
+        if hasattr(self.train_dataset, "_window_paths"):
+            assert hasattr(self.eval_dataset, "_window_paths"), (
+                "train and eval dataset should both be window io"
+            )
+            loop_fn = self._train_eval_loop_by_window
+        else:
+            assert not hasattr(self.eval_dataset, "_window_paths"), (
+                "train and eval dataset should both not window io"
+            )
+            loop_fn = self._train_eval_loop
+        while self._epoch < self.args.train_epoch:
+            for hook in self.hooks:
+                hook.before_epoch(is_train=True)
+            loop_fn(
+                self.args.train_steps if train_steps is None else train_steps,
+                self.args.eval_steps if eval_steps is None else eval_steps,
+                epoch=self._epoch,
+            )
+            self.train_dataset.reset()
+            self.eval_dataset.reset()
+            for hook in self.hooks:
+                hook.after_epoch(is_train=True)
+        for hook in self.hooks:
+            hook.end(is_train=True)
 
     def get_new_window_iter(self, dataset):
         if not hasattr(dataset, "_window_paths"):
@@ -367,48 +391,122 @@ class Trainer:
         dist.all_reduce(self.stop_state, op=dist.ReduceOp.MAX)
         return bool(self.stop_state.item())
 
-    def _train_loop(self, max_steps=None, epoch=1):
+    def _train_loop_by_window(self, max_steps=None, epoch=1):
         self.model.train()
-        if hasattr(self.train_dataset, "_window_paths"):
-            iterator = self.get_new_window_iter(self.train_dataset)
-        else:
-            iterator = iter(self.train_dataset)
-        lstep = 0
         while True:
-            if max_steps is not None and lstep >= max_steps - 1:
-                break
-            stop_flag, data = next(iterator)
-            need_break = False
-            if hasattr(self.train_dataset, "_window_paths"):
-                # if window io, sync the stop flag
-                stop_flag = self.sync_exit_flag(stop_flag)
-                # if stop_flag is True, try to get the next window
-                if stop_flag:
-                    # for window io, save checkpoint after the current window
-                    self.checkpoint_manager.window_step()
-                    iterator = self.get_new_window_iter(self.train_dataset)
-                    # if iterator is None, break
-                    if iterator is None:
-                        need_break = True
-            elif stop_flag:
-                need_break = True
+            iterator = self.get_new_window_iter(self.train_dataset)
+            need_break = iterator is None
             need_break = self.sync_exit_flag(need_break)
             if need_break:
                 break
-            if stop_flag:  # only window io could hit this
-                continue
+            for hook in self.hooks:
+                hook.before_window(is_train=True)
+            self._train_loop_internal(iterator, max_steps, epoch)
+            for hook in self.hooks:
+                hook.after_window(is_train=True)
+
+    def _eval_loop_by_window(self, max_steps=None):
+        self.model.eval()
+        while True:
+            iterator = self.get_new_window_iter(self.eval_dataset)
+            need_break = iterator is None
+            need_break = self.sync_exit_flag(need_break)
+            if need_break:
+                break
+            for hook in self.hooks:
+                hook.before_window(is_train=False)
+            self._eval_loop_internal(iterator, max_steps)
+            for hook in self.hooks:
+                hook.after_window(is_train=False)
+
+    def _train_eval_loop_by_window(self, train_steps=None, eval_steps=None, epoch=1):
+        while True:
+            self.model.train()
+            train_iterator = self.get_new_window_iter(self.train_dataset)
+            train_need_break = train_iterator is None
+            train_need_break = self.sync_exit_flag(train_need_break)
+            if train_need_break:
+                logger.info(
+                    "train_and_eval window will stop, because train dataset has no window to read."
+                )
+                break
+            eval_iterator = self.get_new_window_iter(self.eval_dataset)
+            eval_need_break = eval_iterator is None
+            eval_need_break = self.sync_exit_flag(eval_need_break)
+            if eval_need_break:
+                logger.info(
+                    "train_and_eval window will stop, because eval dataset has no window to read."
+                )
+                break
+            for hook in self.hooks:
+                hook.before_window(is_train=True)
+            self._train_loop_internal(train_iterator, train_steps, epoch)
+            self._eval_loop_internal(eval_iterator, eval_steps)
+            for hook in self.hooks:
+                hook.after_window(is_train=True)
+
+    def _train_loop(self, max_steps=None, epoch=1):
+        self.model.train()
+        iterator = iter(self.train_dataset)
+        self._train_loop_internal(iterator, max_steps, epoch)
+
+    def _evaluate_loop(self, max_steps=None):
+        self.model.eval()
+        iterator = iter(self.eval_dataset)
+        self._eval_loop_internal(iterator, max_steps)
+
+    def _train_evaluate_loop(self, train_steps=None, eval_steps=None, epoch=1):
+        self._train_loop(train_steps, epoch)
+        self._eval_loop(eval_steps)
+
+    def _eval_loop_internal(self, data_iter, max_steps=None):
+        lstep = 0
+        while True:
+            if max_steps is not None and lstep >= max_steps:
+                break
+            stop_flag, data = next(data_iter)
+            need_break = self.sync_exit_flag(stop_flag)
+            if need_break:
+                break
+            for hook in self.hooks:
+                hook.before_step(is_train=False)
             if self.data_to_cuda:
                 data = copy_data_to_device(data, "cuda")
             for hook in self.hooks:
-                hook.after_data(data)
+                hook.after_data(is_train=False)
+            metrics = {}
+            with torch.no_grad():
+                self.model(data)
+            metrics.update(get_global_metrics())
+            for hook in self.hooks:
+                hook.after_step(
+                    metrics=metrics, global_step=self._global_step, is_train=False
+                )
+            lstep += 1
+
+    def _train_loop_internal(self, data_iter, max_steps=None, epoch=1):
+        lstep = 0
+        while True:
+            if max_steps is not None and lstep >= max_steps:
+                break
+            stop_flag, data = next(data_iter)
+            need_break = self.sync_exit_flag(stop_flag)
+            if need_break:
+                break
+            for hook in self.hooks:
+                hook.before_step(is_train=True)
+            if self.data_to_cuda:
+                data = copy_data_to_device(data, "cuda")
+            for hook in self.hooks:
+                hook.after_data(is_train=True)
             metrics = {}
             with self.accelerator.accumulate(self.model):
                 self._train_step(data, epoch, metrics)
             for hook in self.hooks:
-                hook.after_step(metrics, self._global_step)
-            self.checkpoint_manager.step()
+                hook.after_step(
+                    metrics=metrics, global_step=self._global_step, is_train=True
+                )
             lstep += 1
-        self.checkpoint_manager.save()
 
     def _train_step(self, data, epoch, metrics):
         self.dense_optimizer.zero_grad()

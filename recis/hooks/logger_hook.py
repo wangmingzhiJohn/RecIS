@@ -36,7 +36,7 @@ class LoggerHook(Hook):
 
     def __init__(self, log_step=10):
         self.log_step = log_step
-        self.logger = Logger("Metirc")
+        self.logger = Logger("Metric")
         self.steps = 0
         self.start_time = time.time()
 
@@ -64,7 +64,7 @@ class LoggerHook(Hook):
             log_str += f" <{k}={v}>"
         return log_str
 
-    def after_step(self, metrics, global_step=0):
+    def after_step(self, metrics=None, global_step=0, is_train=True, *args, **kwargs):
         """Called after each training step to potentially log metrics.
 
         This method is invoked after each training step. It logs metrics and

@@ -503,7 +503,7 @@ class HashTableFilterHookTest(unittest.TestCase):
             (out["fea_1"].sum() + out["fea_2"].sum() + out["fea_6"].sum()).backward()
             self.opt.step()
             self.opt.zero_grad()
-            self.hook.after_step(-1, step)  # run filter
+            self.hook.after_step(global_step=step)  # run filter
 
             ids, mmap = self.tables["group_a"]["ht"].ids_map()
             self.assertTrue(
@@ -547,7 +547,7 @@ class HashTableFilterHookTest(unittest.TestCase):
             (out["fea_1"].sum() + out["fea_2"].sum() + out["fea_6"].sum()).backward()
             self.opt.step()
             self.opt.zero_grad()
-            self.hook.after_step(-1, step)  # run filter.
+            self.hook.after_step(global_step=step)  # run filter.
 
             # self.assertTrue(ts_equal(mmap, torch.tensor([4, 3, 0, 10, 13]))). only for gpu
             ids, mmap = self.tables["group_a"]["ht"].ids_map()
@@ -586,7 +586,7 @@ class HashTableFilterHookTest(unittest.TestCase):
             self.opt.step()
             self.opt.zero_grad()
 
-            self.hook.after_step(-1, step)  # run filter hook
+            self.hook.after_step(global_step=step)  # run filter hook
 
             ids, mmap = self.tables["group_a"]["ht"].ids_map()
             self.assertTrue(mmap.max().item() <= 12)
@@ -624,7 +624,7 @@ class HashTableFilterHookTest(unittest.TestCase):
             self.opt.zero_grad()
 
             ids, mmap = self.tables["group_a"]["ht"].ids_map()
-            self.hook.after_step(-1, step)  # run hook
+            self.hook.after_step(global_step=step)  # run hook
             self.assertTrue(mmap.max().item() <= 13)
             self.assertTrue(
                 ts_equal(
@@ -779,7 +779,7 @@ class HashTableFilterHookTest(unittest.TestCase):
                 )
             else:
                 self.assertTrue(ts_equal(ids, torch.tensor([1111])))
-            self.hook.after_step(-1, step)  # run hook
+            self.hook.after_step(global_step=step)  # run hook
 
         self.hook.reset_filter_interval(10)
         last_step_id_numel = 0
@@ -793,7 +793,7 @@ class HashTableFilterHookTest(unittest.TestCase):
                 out["fea_5"].sum().backward()
             self.opt.step()
             self.opt.zero_grad()
-            self.hook.after_step(-1, step)
+            self.hook.after_step(global_step=step)
 
             ids, mmap = self.tables["group_c"]["ht"].ids_map()
             last_step_id_numel = after_filter_numel

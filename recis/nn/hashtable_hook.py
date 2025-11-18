@@ -202,7 +202,7 @@ class FilterHook(BaseHook):
             outputs = embedding_engine(samples)
 
             # Trigger filtering check
-            filter_hook.after_step(None, step)
+            filter_hook.after_step(global_step=step)
 
             if step % 10 == 0:
                 print(f"Step {step}: Automatic cleanup performed")
