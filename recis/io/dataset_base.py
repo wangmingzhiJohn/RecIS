@@ -84,7 +84,7 @@ def _convert_raw_to_ragged(dense_column, dtype):
                         except Exception:
                             data[0][0] = data[0][0].astype("U")
                     batch_list[table][fn] = data[0]
-                elif fn in dense_column or fn.startswith("_indicator"):
+                elif fn in dense_column or fn == "_indicator" or fn == "_sample_group_id":
                     values = torch.from_dlpack(data[0][0])
                     if torch.is_floating_point(values):
                         values = values.to(dtype)
@@ -218,6 +218,7 @@ class DatasetBase(IterableDataset):
         self._drop_remainder = drop_remainder
         self._worker_slice_batch_num = worker_slice_batch_num
         self._dtype = dtype
+        self._scene_num = -1
         assert device in [
             "cpu",
             "cuda",
@@ -385,8 +386,23 @@ class DatasetBase(IterableDataset):
         """
         self._map_funcs.append(map_func)
 
+
     def transform_ragged_batch(self, func):
         self._transform_ragged_batch_funcs.append(func)
+
+    def filter_scene(self, scene_num = -1):
+        """[TEMPORARY] Adds a filtering hook for specific scenes.
+
+        WARNING: This method is introduced as a temporary workaround for scene-level
+        data filtering and should not be used in new code. It will be removed in a
+        future version. Consider using the standard `map()` with conditional logic instead.
+
+        Args:
+            func_name (str): The name of the filtering function.
+            scene_num (int): The scene number to control behavior.
+        """
+        self._scene_num = scene_num
+
 
     def filter(self, filter_func):
         """Adds a filtering function to the data processing pipeline.
@@ -549,13 +565,29 @@ class DatasetBase(IterableDataset):
             buffer_output_elements=1,
             prefetch_input_elements=0,
         )
-        self._dataset = self._dataset.pack(
-            self._batch_size,
-            self._drop_remainder,
-            parallel=self._pack_threads_num,
-            pinned_result=(self._device == "pin"),
-            gpu_result=(self._device == "cuda"),
-        )
+
+        """
+          self._scene_num <= -1: unused io filter
+          self._scene_num > -1: used io filter
+        """
+        if self._scene_num <= -1:
+          self._dataset = self._dataset.pack(
+              self._batch_size,
+              self._drop_remainder,
+              parallel=self._pack_threads_num,
+              pinned_result=(self._device == "pin"),
+              gpu_result=(self._device == "cuda")
+          )
+        else:
+          self._dataset = self._dataset.pack(
+              self._batch_size,
+              self._drop_remainder,
+              parallel=self._pack_threads_num,
+              pinned_result=(self._device == "pin"),
+              gpu_result=(self._device == "cuda"),
+              scene_num=self._scene_num
+          )
+
         if self._prefetch:
             self._dataset = self._dataset.prefetch(self._prefetch)
         self._dataset = self._create_state_dataset(self._dataset, sub_id, sub_num)
