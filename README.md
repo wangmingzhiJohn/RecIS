@@ -100,6 +100,7 @@ The RecIS framework implements efficient dynamic embeddings (HashTable) through 
   - Optimizes reduction operators through warp-level merging, reducing atomic operations and improving memory access utilization
 
 ## 🏆 Notable work based on RecIS
+  - [MOON Embedding](https://arxiv.org/abs/2511.11305): MOON Embedding: Multimodal Representation Learning for E-commerce Search Advertising.
   - [MOON](https://arxiv.org/abs/2508.11999): Generative MLLM-based Multimodal Representation Learning for E-commerce Product Understanding.
   - [LUM](https://arxiv.org/abs/2502.08309): Unlocking Scaling Law in Industrial Recommendation Systems with a Three-step Paradigm based Large User Model.
 
