@@ -355,13 +355,14 @@ class Saver:
         else:
             logger.info("No need to load io state")
         for key, value in self._extra_save_dict.items():
-            if hasattr(value, "load_state_dict"):
-                value.load_state_dict(extra_data[key])
-            elif isinstance(value, torch.Tensor):
-                value.copy_(extra_data[key])
-            else:
-                value = extra_data[key]
-            self._extra_save_dict[key] = value
+            if key in extra_data:
+                if hasattr(value, "load_state_dict"):
+                    value.load_state_dict(extra_data[key])
+                elif isinstance(value, torch.Tensor):
+                    value.copy_(extra_data[key])
+                else:
+                    value = extra_data[key]
+                self._extra_save_dict[key] = value
 
     def load_sparse_optim(self):
         """Load sparse optimizer state from checkpoint."""
