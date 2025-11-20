@@ -313,21 +313,21 @@ void SaveBundle::MergeTorchRankJson() {
         v["dtype"] = type_map_[v["dtype"].get<std::string>()];
         v["dimension"] = 0;
         v["is_hashmap"] = false;
-      } else {
-        if (k.find(NewTensorKeyEmbedding()) != std::string::npos) {
-          v.erase("data_offsets");
-          v["name"] = k;
-          v["dtype"] = type_map_[v["dtype"].get<std::string>()];
-          v["dimension"] = v["shape"].back().get<int>();
-          std::string hashmap_key = util::string::Replace(
-              k, NewTensorKeyEmbedding(), NewTensorKeyId());
-          v["hashmap_key"] = hashmap_key;
-          v["hashmap_key_dtype"] = "int64";
-          v["hashmap_value"] = k;
-          v["is_hashmap"] = true;
-        }
+        combine_data[k] = v;
+      } else if (k.find(NewTensorKeyEmbedding()) != std::string::npos) {
+        v.erase("data_offsets");
+        v["name"] = k;
+        v["dtype"] = type_map_[v["dtype"].get<std::string>()];
+        v["dimension"] = v["shape"].back().get<int>();
+        std::string hashmap_key =
+            util::string::Replace(k, NewTensorKeyEmbedding(), NewTensorKeyId());
+        v["hashmap_key"] = hashmap_key;
+        v["hashmap_key_dtype"] = "int64";
+        v["hashmap_value"] = k;
+        v["is_hashmap"] = true;
+        combine_data[k] = v;
       }
-      combine_data[k] = v;
+      // else v will be `id` or `opt`, which are not needed in the meta file
     } else {
       LOG(WARNING) << "Duplicate key found in data: " << k;
     }

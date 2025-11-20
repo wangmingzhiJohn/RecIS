@@ -93,11 +93,14 @@ class TestCase(unittest.TestCase):
             print(self._tensor_map_json, f" keys not equal to {num_sparse}")
             return False
 
-        if len(rank_data) != num_sparse + num_dense:
-            print(self._rank_json, f" keys not equal to {num_sparse + num_dense}")
+        if len(rank_data) != num_sparse // 2 + num_dense:
+            # id is not saved in the meta file
+            print(self._rank_json, f" keys not equal to {num_sparse // 2 + num_dense}")
             return False
 
         for k in tensor_name_data.keys():
+            if ".embedding" not in k:
+                continue
             if k not in rank_data.keys():
                 return False
 
@@ -134,7 +137,7 @@ class TestCase(unittest.TestCase):
         with open(os.path.join(self._path[parallel], self._index_file)) as f:
             data = json.load(f)
             index_data, file_data = data["block_index"], data["file_index"]
-            if len(index_data) != len(rank_data):
+            if len(index_data) != len(rank_data) + num_sparse // 2:
                 return False
 
             for val in index_data.values():

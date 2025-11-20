@@ -1,3 +1,4 @@
+import json
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -286,6 +287,37 @@ class Saver:
         saver.save()
         sync_func()
 
+    def _save_dense_meta(
+        self,
+        fs,
+        ckpt_path: str,
+        dense_state_dict: OrderedDict,
+        meta_file: str = "torch_rank_weights_embs_table_multi_shard.json"
+    ):
+        meta_file_path = os.path.join(ckpt_path, meta_file)
+        data = {}
+        for name, tensor in dense_state_dict.items():
+            if isinstance(tensor, torch.Tensor):
+                shape_list = [int(dim) for dim in tensor.shape]
+                value = {}
+                value["name"] = name
+                value["dense"] = True
+                value["dimension"] = 0
+                value["is_hashmap"] = False
+                value["dtype"] = str(tensor.dtype).replace('torch.', '')
+                value["shape"] = shape_list
+                data[name] = value
+            else:
+                logger.warning(f"{name} is not torch.Tensor in dense_state_dict, will not be saved to torch_rank_weights_embs_table_multi_shard.json")
+
+        if not fs.exists(meta_file_path):
+            logger.error(f"Meta file {meta_file_path} not found after saving sparse params")
+        with fs.open(meta_file_path, "r") as f:
+            existing_data = json.load(f)
+        existing_data.update(data)
+        with fs.open(meta_file_path, "w") as out_f:
+            json.dump(existing_data, out_f, indent=4)
+
     def save_dense_params(self, ckpt_path: str, dense_state_dict: OrderedDict):
         """Save dense model parameters.
 
@@ -297,6 +329,8 @@ class Saver:
         pt_file = os.path.join(ckpt_path, "model.pt")
         with fs.open(pt_file, "wb") as f:
             torch.save(dense_state_dict, f=f)
+
+        self._save_dense_meta(fs, ckpt_path, dense_state_dict)
 
     def load_sparse_params(self, ckpt_dir: str):
         """Load sparse parameters from checkpoint.
