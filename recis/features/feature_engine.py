@@ -6,6 +6,11 @@ from torch import nn
 from recis.features.feature import Feature
 from recis.features.fused_op_impl import FusedOpFactory
 from recis.features.op import _OP
+from recis.metrics.metric_reporter import (
+    FEA_ENGINE_NAME,
+    SPARSE_FWD_NAME,
+    MetricReporter,
+)
 from recis.utils.logger import Logger
 
 
@@ -255,6 +260,9 @@ class FeatureEngine(nn.Module):
             execution_steps.append(exec_step)
         return execution_steps
 
+    @MetricReporter.report_time_wrapper(
+        SPARSE_FWD_NAME, {"recis_emb_phase": FEA_ENGINE_NAME}
+    )
     def forward(self, data: Dict, remain_no_use_data: bool = True) -> Dict:
         """Process input data through all compiled feature pipelines.
 

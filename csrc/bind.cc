@@ -1,3 +1,4 @@
+#include <map>
 #include <string>
 #include <unordered_map>
 
@@ -13,6 +14,7 @@
 #include "embedding/initializer.h"
 #include "embedding/optim.h"
 #include "embedding/slot_group.h"
+#include "monitor/metric_client.h"
 #include "ops/adam_tf_op.h"
 #include "ops/block_apply_adamw_op.h"
 #include "ops/block_ops.h"
@@ -109,6 +111,9 @@ TORCH_LIBRARY(recis, m) {
       .def("get_slot", &Hashtable::GetSlot)
       .def("delete", &Hashtable::Delete)
       .def("ids_map", &Hashtable::ids_map)
+      .def("id_info", &Hashtable::id_info)
+      .def("id_memory_info", &Hashtable::id_memory_info)
+      .def("emb_memory_info", &Hashtable::emb_memory_info)
       .def_readonly("hashtable_tag", &Hashtable::kNullIndex);
 
   // optimzier
@@ -221,4 +226,24 @@ TORCH_LIBRARY(recis, m) {
   m.def("ragged_tile", recis::functional::ragged_tile);
   m.def("ragged_tile_back", recis::functional::ragged_tile_back);
   m.def("calc_ragged_index", recis::functional::calc_ragged_index);
+
+  m.class_<recis::monitor::Client>("MonitorClient")
+      .def(torch::init([](const std::string& name) {
+        return c10::make_intrusive<recis::monitor::Client>(name);
+      }))
+      .def("report",
+           [](c10::intrusive_ptr<recis::monitor::Client> self,
+              const std::string& name, double value,
+              const c10::Dict<std::string, std::string>& tag_dict,
+              int64_t pType) {
+             return self->report_py(name, value, tag_dict, pType);
+           })
+      .def("reset_metric", &recis::monitor::Client::reset_metric_py)
+      .def("take_snapshot", &recis::monitor::Client::take_snapshot);
+  m.class_<recis::monitor::Factory>("MonitorFactory")
+      .def(torch::init([](const std::string& base_log) {
+        return c10::make_intrusive<recis::monitor::Factory>(base_log);
+      }))
+      .def("get_client", &recis::monitor::Factory::get_client_py);
+  m.def("make_MonitorFactory", &recis::monitor::Factory::MakeInstancePy);
 }

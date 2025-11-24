@@ -105,7 +105,9 @@ class LocalRpcDataSampler:
             dedup_tag_ragged_tensor = batch[0][dedup_tag]
             # Sample (sample_size - 1) negative samples for each positive sample.
             # Values in sample_cnts don't need to be equal, enabling dynamic negative sampling.
-            sample_cnts = sample_size - torch.ones_like(dedup_tag_ragged_tensor.values())
+            sample_cnts = sample_size - torch.ones_like(
+                dedup_tag_ragged_tensor.values()
+            )
             # Pass sample_tag and dedup_tag to obtain a set of negative sample IDs
             neg_sample_ids = neg_sampler.sample_ids(
                 dedup_tag_ragged_tensor=dedup_tag_ragged_tensor,

@@ -7,6 +7,14 @@ from typing import List, Optional, Union
 import torch
 import torch.distributed as dist
 
+from recis.metrics.metric_reporter import (
+    EMB_BYTES_NAME,
+    ID_SIZE_A2A_TIME_NAME,
+    ID_SIZE_NAME,
+    REDUCE_EMB_BYTES_NAME,
+    UNIQUE_ID_SIZE_NAME,
+    MetricReporter,
+)
 from recis.nn.functional.embedding_ops import (
     ids_partition,
     ragged_embedding_segment_reduce,
@@ -376,6 +384,14 @@ class DynamicEmbedding(torch.nn.Module):
             filter_hook=self._emb_opt.filter_hook,
         )
 
+    @property
+    def name(self):
+        return self._emb_opt.shared_name
+
+    @property
+    def info(self):
+        return f"{self._emb_opt.shared_name}_{self._emb_opt.embedding_dim}_{self._emb_opt.dtype}"
+
     def deal_with_tensor(self, input_tensor: Union[torch.Tensor, RaggedTensor]):
         """Process input tensor to extract values, offsets, weights, and shape.
 
@@ -510,12 +526,19 @@ class DynamicEmbedding(torch.nn.Module):
             ExchangeIDsResults: Data class containing exchanged IDs and
                 metadata needed for the reverse operation.
         """
+        MetricReporter.report_size(ID_SIZE_NAME, ids, {"recis_ht_name": self.info})
         ids, ids_parts, ids_reverse_index = ids_partition(
             ids, self._emb_opt.max_partition_num, self._world_size
         )
+        MetricReporter.report_size(
+            UNIQUE_ID_SIZE_NAME, ids, {"recis_ht_name": self.info}
+        )
         # sync all to all: exchange parts num
         ids_parts_reverse = torch.empty_like(ids_parts)
-        dist.all_to_all_single(ids_parts_reverse, ids_parts, group=self._pg)
+        with MetricReporter.report_time(
+            ID_SIZE_A2A_TIME_NAME, {"recis_ht_name": self.info}
+        ):
+            dist.all_to_all_single(ids_parts_reverse, ids_parts, group=self._pg)
         ids_parts_reverse = ids_parts_reverse.to(device="cpu")
         ids_parts = ids_parts.to(device="cpu")
         ids_parts_reverse = ids_parts_reverse.tolist()
@@ -613,6 +636,7 @@ class DynamicEmbedding(torch.nn.Module):
                 emb = emb.to(torch.float16)
             else:
                 emb = emb.to(torch.float32)
+        MetricReporter.report_bytes(EMB_BYTES_NAME, emb, {"recis_ht_name": self.info})
         emb = ragged_embedding_segment_reduce(
             emb,
             weight,
@@ -620,5 +644,8 @@ class DynamicEmbedding(torch.nn.Module):
             emb_exchange_result.offsets,
             combiner,
             combiner_kwargs,
+        )
+        MetricReporter.report_bytes(
+            REDUCE_EMB_BYTES_NAME, emb, {"recis_ht_name": self.info}
         )
         return emb

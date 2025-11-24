@@ -9,6 +9,7 @@ trace*.json
 compile_commands.json
 recis/lib
 .vscode/*
+.idea/*
 docs/_build
 .DS_Store
 info.py

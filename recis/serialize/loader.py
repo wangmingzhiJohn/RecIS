@@ -3,6 +3,8 @@ from typing import Optional
 
 import torch
 
+from recis.metrics.metric_reporter import LOAD_SIZE_NAME, LOAD_TIME_NAME, MetricReporter
+
 
 class Loader:
     """Loads model state dictionaries from checkpoint files with parallel processing.
@@ -57,6 +59,7 @@ class Loader:
         )
         self._filter_func = filter_func
 
+    @MetricReporter.report_time_wrapper(LOAD_TIME_NAME, force=True)
     def load(self):
         """Executes the loading process.
 
@@ -73,4 +76,5 @@ class Loader:
         """
         load_info = json.loads(self._impl.default_load_info())
         load_info = self._filter_func(load_info)
-        self._impl.load(json.dumps(load_info))
+        load_size = self._impl.load(json.dumps(load_info))
+        MetricReporter.report(LOAD_SIZE_NAME, load_size, force=True)

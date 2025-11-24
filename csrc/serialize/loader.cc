@@ -59,14 +59,15 @@ std::string Loader::DefaultLoadInfo() {
   return load_info.Serialize();
 }
 
-void Loader::Load(std::string load_info_buf) {
-  LoadInfo load_info;
-  load_info.Deserialize(load_info_buf);
+int64_t Loader::Load(std::string load_info) {
+  LoadInfo load_info_obj;
+  load_info_obj.Deserialize(load_info);
 
   auto load_bundle = LoadBundle::Make(path_);
   auto loader_internal = LoaderInternal::Make(
-      load_info, load_bundle, hts_to_load_, tensors_to_load_, parallel_);
+      load_info_obj, load_bundle, hts_to_load_, tensors_to_load_, parallel_);
   loader_internal->Load();
+  return 0;
 }
 
 Loader::~Loader() {}

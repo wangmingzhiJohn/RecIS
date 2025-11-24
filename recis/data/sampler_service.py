@@ -158,7 +158,9 @@ class _SamplerWrapper:
     ):
         with self._rw_lock.read_lock():
             return self._sampler.pack_feature(
-                local_data_sample_ids, decorate_skey=decorate_skey, default_value=default_value
+                local_data_sample_ids,
+                decorate_skey=decorate_skey,
+                default_value=default_value,
             )
 
     def valid_sample_ids(self, ids, default_value=-1):

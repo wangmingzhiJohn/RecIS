@@ -23,7 +23,8 @@ class Loader : public torch::CustomClassHolder {
   }
   */
   std::string DefaultLoadInfo();
-  void Load(std::string load_info);
+  // TODO(lanling) return load size
+  int64_t Load(std::string load_info);
   ~Loader();
 
  private:

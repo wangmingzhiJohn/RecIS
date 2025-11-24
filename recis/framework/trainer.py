@@ -21,6 +21,7 @@ from recis.hooks.checkpoint_hooks import (
     CheckpointSaveArguments,
     CheckpointSaveHook,
 )
+from recis.hooks.metric_report_hook import MetricReportHook
 from recis.optim import sparse_optim
 from recis.utils.data_utils import copy_data_to_device
 from recis.utils.logger import Logger
@@ -265,6 +266,12 @@ class Trainer:
         self.hooks.append(
             CheckpointLoadHook(
                 self.saver, self._global_step, self._epoch, ckpt_load_arg
+            )
+        )
+        self.hooks.append(
+            MetricReportHook(
+                model=self.model,
+                report_args=None,
             )
         )
 

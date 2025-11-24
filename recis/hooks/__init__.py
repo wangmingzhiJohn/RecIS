@@ -3,10 +3,17 @@ from recis.info import is_internal_enabled
 from .filter_hook import HashTableFilterHook
 from .hook import Hook
 from .logger_hook import LoggerHook
+from .metric_report_hook import MetricReportHook
 from .profiler_hook import ProfilerHook
 
 
-__all__ = ["Hook", "LoggerHook", "ProfilerHook", "HashTableFilterHook"]
+__all__ = [
+    "Hook",
+    "LoggerHook",
+    "ProfilerHook",
+    "HashTableFilterHook",
+    "MetricReportHook",
+]
 
 if is_internal_enabled():
     from .ml_tracker_hook import (

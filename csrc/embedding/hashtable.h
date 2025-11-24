@@ -76,6 +76,21 @@ class Hashtable : public torch::CustomClassHolder {
                            std::move(id_index.second));
   }
 
+  std::tuple<int64_t, int64_t> id_info() {
+    // TODO(mingjie)
+    return std::make_tuple(0, 0);
+  }
+
+  int64_t id_memory_info() {
+    // TODO(mingjie)
+    return 0;
+  }
+
+  std::tuple<int64_t, int64_t> emb_memory_info() {
+    // TODO(mingjie)
+    return std::make_tuple(0, 0);
+  }
+
   static int64_t EncodeIdWithMask(int64_t id, int64_t mask_id);
   static std::pair<int64_t, int64_t> DecodeIdToIndexAndMask(int64_t id);
 

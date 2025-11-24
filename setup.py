@@ -17,7 +17,8 @@ def get_source_file(source_dir, delete_set, with_path):
             [
                 os.path.join(dirname, filename) if with_path else filename
                 for filename in filenames
-                if (filename.endswith((".cc", ".cu"))) and (filename not in delete_set)
+                if (filename.endswith((".cc", ".cu", ".c")))
+                and (filename not in delete_set)
             ]
         )
     return ret
@@ -83,6 +84,7 @@ def get_main_extension():
 
     source_dirs = [
         "embedding",
+        "monitor",
         "platform",
         "distributed",
         "ops",
