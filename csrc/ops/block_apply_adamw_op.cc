@@ -125,7 +125,7 @@ void block_apply_adamw(const torch::Tensor index, const torch::Tensor grad,
                        std::vector<torch::Tensor> exp_avg_sq, double lr,
                        double beta1, double beta2, double weight_decay,
                        double eps, int64_t block_size) {
-  step.add(1);
+  step.add_(1);
   auto alpha_t = torch::empty_like(beta1_t);
   if (index.device().type() == torch::kCUDA) {
     block_apply_adamw_gpu(index, grad, emb_blocks, beta1_t, beta2_t, alpha_t,
