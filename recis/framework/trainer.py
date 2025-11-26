@@ -12,7 +12,7 @@ from accelerate import (
 from torch import nn
 from torch.utils.data import Dataset
 
-from recis.framework.checkpoint_manager import Saver, SaverOptions
+from recis.framework.checkpoint_manager import ExtraFields, Saver, SaverOptions
 from recis.framework.metrics import get_global_metrics
 from recis.hooks import Hook, LoggerHook
 from recis.hooks.checkpoint_hooks import (
@@ -100,7 +100,6 @@ class Trainer:
         sparse_optimizer (Optional[sparse_optim.SparseOptimizer]): Sparse parameter optimizer.
         data_to_cuda (bool): Whether to automatically move data to CUDA.
         accelerator (Accelerator): Accelerate instance for distributed training.
-        checkpoint_manager (CheckpointManager): Handles checkpoint operations.
 
     Example:
 
@@ -214,20 +213,26 @@ class Trainer:
     def init_saver(self, model, args, saver):
         saver = self.build_saver(model, args, saver)
         if self.train_dataset is not None:
-            saver.register_io_state("train_io", self.train_dataset)
+            saver.register_io_state(ExtraFields.train_io, self.train_dataset)
             if hasattr(self.train_dataset, "_window_paths"):
-                saver.register_for_checkpointing("train_window_io", self.train_dataset)
+                saver.register_for_checkpointing(
+                    ExtraFields.train_window_io, self.train_dataset
+                )
         if self.eval_dataset is not None and hasattr(
             self.eval_dataset, "_window_paths"
         ):
-            saver.register_io_state("eval_io", self.eval_dataset)
-            saver.register_for_checkpointing("eval_window_io", self.eval_dataset)
+            saver.register_io_state(ExtraFields.eval_io, self.eval_dataset)
+            saver.register_for_checkpointing(
+                ExtraFields.eval_window_io, self.eval_dataset
+            )
         if self.dense_optimizer is not None:
-            saver.register_for_checkpointing("dense_optimizer", self.dense_optimizer)
-        if not saver.get_extra_data("global_step"):
-            saver.register_for_checkpointing("global_step", self._global_step)
-        if not saver.get_extra_data("train_epoch"):
-            saver.register_for_checkpointing("train_epoch", self._epoch)
+            saver.register_for_checkpointing(
+                ExtraFields.recis_dense_optim, self.dense_optimizer
+            )
+        if not saver.get_extra_data(ExtraFields.global_step):
+            saver.register_for_checkpointing(ExtraFields.global_step, self._global_step)
+        if not saver.get_extra_data(ExtraFields.train_epoch):
+            saver.register_for_checkpointing(ExtraFields.train_epoch, self._epoch)
         return saver
 
     def build_saver(self, model, args, saver):

@@ -119,9 +119,9 @@ void LoaderInternal::BuildHTLoadCollection(
         ska::flat_hash_map<std::string, at::intrusive_ptr<HTReadCollection>>
             read_collections;
         for (const auto &slot_name : slot_names) {
-          // auto tensor_name = HTSlotNameEncode(load_shared_name, slot_name);
-          std::string tensor_name =
-              torch::str(shared_name, TensorSymbolAt(), slot_name);
+          auto tensor_name = HTSlotNameEncode(load_shared_name, slot_name);
+          // std::string tensor_name =
+          // torch::str(shared_name, TensorSymbolAt(), slot_name);
           if (load_bundle_->HasTensor(tensor_name)) {
             // find tensor in ckpt.
             auto slice_infos = load_bundle_->SliceInfos(tensor_name);

@@ -2,13 +2,24 @@ import json
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
+from functools import partial
 from typing import Dict, Optional
 
 import torch
 
 from recis.framework.filesystem import get_file_system
+from recis.framework.model_bank import (
+    MBC,
+    ModelBankParser,
+    get_update_path,
+    load_pt_file,
+    show_model_bank_format,
+)
 from recis.info import is_internal_enabled
-from recis.nn.modules.hashtable import split_sparse_dense_state_dict
+from recis.nn.modules.hashtable import (
+    filter_out_sparse_param,
+    split_sparse_dense_state_dict,
+)
 from recis.optim.sparse_optim import SparseOptimizer
 from recis.serialize import Loader as SLoader, Saver as SSaver
 from recis.utils.logger import Logger
@@ -21,7 +32,84 @@ if is_internal_enabled():
 else:
     PanguException = None
     Mos = None
+
 logger = Logger(__name__)
+
+
+class ExtraFields:
+    global_step = "global_step"
+    recis_dense_optim = "recis.dense.optim."
+    train_io = "train_io"
+    eval_io = "eval_io"
+    train_window_io = "train_window_io"
+    eval_window_io = "eval_window_io"
+    io_state = "io_state"
+    train_epoch = "train_epoch"
+    prev_optim = "dense_optimizer"
+
+    _fields = {
+        global_step,
+        recis_dense_optim,
+        train_io,
+        eval_io,
+        train_window_io,
+        eval_window_io,
+        train_epoch,
+    }
+
+    @classmethod
+    def get_io_fields(cls):
+        return {
+            cls.train_window_io,
+            cls.eval_window_io,
+            cls.train_io,
+            cls.eval_io,
+            cls.train_epoch,
+        }
+
+    @classmethod
+    def all_fields(cls):
+        return cls._fields
+
+    @classmethod
+    def __contains__(cls, item):
+        return item in cls._fields
+
+
+def filter_bank(model_bank_conf: dict, internal: dict):
+    load_info = {k: {k: []} for k in internal.keys()}
+    for k in model_bank_conf.keys():
+        if "@" in k:
+            name, type = k.split("@")
+            assert name in load_info, f"name {name} not found in internal"
+            load_info[name][name].append(type)
+        else:
+            name = k
+            assert name in load_info, f"name {name} not found in internal"
+
+    new_load_info = {}
+    table_mapping = {}
+    for key, conf in model_bank_conf.items():
+        if MBC.ONAME in conf:
+            src_table = key.split("@")[0]
+            tgt_table = conf[MBC.ONAME].split("@")[0]
+            if src_table not in table_mapping:
+                table_mapping[src_table] = tgt_table
+            else:
+                assert table_mapping[src_table] == tgt_table, (
+                    f"table {src_table} mapping to different table {tgt_table}"
+                )
+
+    for top_key, inner_dict in load_info.items():
+        inner_key = next(iter(inner_dict.keys()))
+        inner_value = inner_dict[inner_key]
+        if inner_key in table_mapping:
+            target_table = table_mapping[inner_key]
+            new_load_info[top_key] = {target_table: inner_value}
+        else:
+            new_load_info[top_key] = inner_dict
+
+    return new_load_info
 
 
 @dataclass
@@ -89,7 +177,6 @@ class Saver:
             assert Mos is not None, "Cannot import mos, check internal version."
             self._mos = Mos(self._output_dir)
             self._output_dir = self._mos.real_physical_path
-        self._model_bank = options.model_bank
 
         self._sparse_optim = options.sparse_optim
         self._sparse_optim_state = {}
@@ -98,6 +185,117 @@ class Saver:
             self._sparse_state_dict.update(self._sparse_optim_state)
         self._concurrency = options.concurrency
         self._io_state = {}
+
+        self._dense_names = self._get_dense_names()
+        self._sparse_names, self._sparse_tables = self._get_sparse_names()
+
+        self._model_names = (
+            self._dense_names | self._sparse_names | ExtraFields.all_fields()
+        )
+
+        logger.info("============ Model Name Sparse and Dense ====================")
+        for name in self._dense_names:
+            logger.info(f"Dense Model Name: {name}")
+        for name in self._sparse_names:
+            logger.info(f"Sparse Model Name: {name}")
+        for name in ExtraFields.all_fields():
+            logger.info(f"Extra Model Name: {name}")
+
+        self._model_bank_content = options.model_bank
+        self._has_bank = False
+        if self._model_bank_content is None or (
+            isinstance(self._model_bank_content, list)
+            and len(self._model_bank_content) == 0
+        ):
+            logger.warning("No model bank provided, use default model bank")
+            self._model_bank_content = []
+        self._init_model_bank(self._model_bank_content)
+
+    def _check_name_conflict(self):
+        dense_names = set()
+        for name, _ in self._model.named_parameters():
+            dense_names.add(name)
+
+        for key in self._sparse_state_dict.keys():
+            if key in dense_names:
+                raise ValueError(
+                    f"model name conflict, sparse and dense names should not have intersection: {key}"
+                )
+
+    def _init_model_bank(self, model_bank=None):
+        model_bank_content = (
+            model_bank if model_bank is not None else self._model_bank_content
+        )
+
+        self._check_name_conflict()
+
+        self._model_bank_parser = ModelBankParser(
+            self._output_dir,
+            model_bank_content,
+            self._model_names,
+            self._sparse_names,
+            self._sparse_tables,
+            self._dense_names,
+        )
+
+        self._has_bank = self._model_bank_parser.has_bank()
+        self._all_model_bank = self._model_bank_parser.parse_all_model_bank()
+        self._dynamic_model_bank = self._model_bank_parser.parse_dynamic_model_bank()
+
+        if 0 == self._shard_id:
+            self._show_model_bank_table()
+
+    def _show_model_bank_table(self):
+        logger.info("============ Init Bank Format =============")
+        show_model_bank_format(
+            "all_model_bank",
+            self._all_model_bank,
+        )
+
+        logger.info("============ Dynamic Bank Format =============")
+        show_model_bank_format(
+            "dynamic_model_bank",
+            self._dynamic_model_bank,
+        )
+
+    @property
+    def output_dir(self):
+        return self._output_dir
+
+    @output_dir.setter
+    def output_dir(self, value):
+        self._output_dir = value
+
+    @property
+    def mos(self):
+        return self._mos
+
+    def _get_dense_names(self):
+        return set(self._dense_state_dict.keys())
+
+    def _get_sparse_names(self):
+        model_names = set()
+        sparse_state_copy = self._sparse_state_dict.copy()
+        sparse_state_dict, dense_state_dict = split_sparse_dense_state_dict(
+            sparse_state_copy
+        )
+        model_names.update(dense_state_dict.keys())
+        for hashtable_obj in sparse_state_dict.values():
+            slot_group = hashtable_obj.slot_group()
+            children_info = hashtable_obj.children_info()
+            children_names = children_info.children()
+            for child_name in children_names:
+                slots = slot_group.slots()
+                for slot in slots:
+                    model_names.add(f"{child_name}@{slot.name()}")
+                model_names.add(f"{child_name}@id")
+
+        sparse_tables = set()
+        for tensor in model_names:
+            if "@" in tensor:
+                sparse_tables.add(tensor.split("@")[0])
+
+        return model_names, sparse_tables
 
     def register_io_state(self, name, obj: object):
         """Register an object for IO state persistence.
@@ -143,6 +341,9 @@ class Saver:
                         out_f.write(inf.read())
                     fs.delete(filename)
 
+    def _save_generic(self, value):
+        return value.state_dict() if hasattr(value, "state_dict") else value
+
     def save(
         self,
         ckpt_id: str,
@@ -177,6 +378,8 @@ class Saver:
                 self._sparse_state_dict,
                 self._concurrency,
             )
+
+        # save train and eval io states
         io_states = {}
         for io_name, io in self._io_state.items():
             io_states[io_name] = io.dump_io_state()
@@ -185,16 +388,18 @@ class Saver:
                 os.path.join(ckpt_path, f"io_state_{self._shard_id}.pt"), "wb"
             ) as f:
                 torch.save(io_states, f=f)
+
+        # save dense and extra states
         if self._shard_id == 0:
             if len(self._dense_state_dict.keys()) > 0:
                 self.save_dense_params(ckpt_path, self._dense_state_dict)
             if len(self._extra_save_dict.keys()) > 0:
                 extra_save = {}
                 for key, value in self._extra_save_dict.items():
-                    if hasattr(value, "state_dict"):
+                    if key == ExtraFields.recis_dense_optim:
                         extra_save[key] = value.state_dict()
                     else:
-                        extra_save[key] = value
+                        extra_save[key] = self._save_generic(value)
                 with fs.open(os.path.join(ckpt_path, "extra.pt"), "wb") as f:
                     torch.save(extra_save, f=f)
                 if io_states:
@@ -292,7 +497,7 @@ class Saver:
         fs,
         ckpt_path: str,
         dense_state_dict: OrderedDict,
-        meta_file: str = "torch_rank_weights_embs_table_multi_shard.json"
+        meta_file: str = "torch_rank_weights_embs_table_multi_shard.json",
     ):
         meta_file_path = os.path.join(ckpt_path, meta_file)
         data = {}
@@ -304,14 +509,18 @@ class Saver:
                 value["dense"] = True
                 value["dimension"] = 0
                 value["is_hashmap"] = False
-                value["dtype"] = str(tensor.dtype).replace('torch.', '')
+                value["dtype"] = str(tensor.dtype).replace("torch.", "")
                 value["shape"] = shape_list
                 data[name] = value
             else:
-                logger.warning(f"{name} is not torch.Tensor in dense_state_dict, will not be saved to torch_rank_weights_embs_table_multi_shard.json")
+                logger.warning(
+                    f"{name} is not torch.Tensor in dense_state_dict, will not be saved to torch_rank_weights_embs_table_multi_shard.json"
+                )
 
         if not fs.exists(meta_file_path):
-            logger.error(f"Meta file {meta_file_path} not found after saving sparse params")
+            logger.error(
+                f"Meta file {meta_file_path} not found after saving sparse params"
+            )
         with fs.open(meta_file_path, "r") as f:
             existing_data = json.load(f)
         existing_data.update(data)
@@ -323,7 +532,7 @@ class Saver:
 
         Args:
             ckpt_path (str): Path to save checkpoint.
-            dense_state_dict (OrderedDict): Dense parameters to save.
+            dense_state_dict (dict): Dense parameters to save.
         """
         fs = get_file_system(ckpt_path)
         pt_file = os.path.join(ckpt_path, "model.pt")
@@ -332,47 +541,86 @@ class Saver:
 
         self._save_dense_meta(fs, ckpt_path, dense_state_dict)
 
-    def load_sparse_params(self, ckpt_dir: str):
+    def load_sparse_params(self, ckpt_dir: str, model_bank_conf: dict):
         """Load sparse parameters from checkpoint.
 
         Args:
             ckpt_dir (str): Directory containing the checkpoint.
+            model_bank_conf (dict): Model bank config.
         """
         sparse_state_copy = self._sparse_state_dict.copy()
         sparse_state_dict, dense_state_dict = split_sparse_dense_state_dict(
             sparse_state_copy
         )
+
+        filter_func = partial(filter_bank, model_bank_conf)
+
         loader = SLoader(
-            ckpt_dir, hashtables=sparse_state_dict, tensors=dense_state_dict
+            ckpt_dir,
+            hashtables=sparse_state_dict,
+            tensors=dense_state_dict,
+            filter_func=filter_func,
         )
         loader.load()
 
-    def load_dense_params(self, ckpt_dir: str, strict: bool = True):
+    def load_dense_params(self, ckpt_dir: str, model_bank_conf: dict):
         """Load dense model parameters from checkpoint.
 
         Args:
             ckpt_dir (str): Directory containing the checkpoint.
             strict (bool): Whether to strictly enforce state dict keys match. Defaults to True.
         """
-        logger.info("Load dense model")
-        pt_file = os.path.join(ckpt_dir, "model.pt")
-        fs = get_file_system(ckpt_dir)
-        with fs.open(pt_file, "rb") as f:
-            self._model.load_state_dict(torch.load(f=f), strict=strict)
+        state_dict_loaded = load_pt_file(ckpt_dir, "model")
+        if len(state_dict_loaded) == 0:
+            logger.warning(f"No dense model found in {ckpt_dir}")
+            return
 
-    def load_extra_params(self, ckpt_dir: str, load_io: bool, shared_id: int = 0):
+        logger.info("Load dense model")
+        filter_dict = {}
+        for k, v in state_dict_loaded.items():
+            if k in model_bank_conf:
+                if MBC.ONAME in model_bank_conf[k]:
+                    oname = model_bank_conf[k][MBC.ONAME]
+                    if oname in state_dict_loaded:
+                        logger.info(f"debug info: {k} -> {oname}")
+                        filter_dict[k] = state_dict_loaded[oname]
+                    else:
+                        logger.warning(f"[oname] No dense model found dst, for {oname}")
+                else:
+                    filter_dict[k] = v
+
+        if len(filter_dict) != 0:
+            missing, unexpected = self._model.load_state_dict(filter_dict, strict=False)
+            if len(missing) > 0:
+                logger.warning(f"Missing keys in dense model: {missing}")
+            if len(unexpected) > 0:
+                logger.warning(f"Unexpected keys in dense model: {unexpected}")
+        else:
+            logger.info("No dense model to load")
+
+    @property
+    def model(self):
+        return self._model
+
+    def load_extra_params(
+        self,
+        ckpt_dir: str,
+        model_bank_conf: dict,
+        shared_id: int = 0,
+    ):
         """Load extra parameters and IO states from checkpoint.
 
         Args:
             ckpt_dir (str): Directory containing the checkpoint.
-            load_io (bool): Whether to load IO states.
+            model_bank_conf (dict): Model bank config.
             shared_id (int): Shard ID for loading IO states. Defaults to 0.
         """
-        extra_file = os.path.join(ckpt_dir, "extra.pt")
-        fs = get_file_system(extra_file)
-        with fs.open(extra_file, "rb") as f:
-            extra_data = torch.load(f=f)
-        if load_io:
+        fs = get_file_system(os.path.join(ckpt_dir, "index"))
+
+        if (
+            ExtraFields.train_io in model_bank_conf
+            and ExtraFields.eval_io in model_bank_conf
+        ):
             with fs.open(os.path.join(ckpt_dir, "io_state_count"), "r") as f:
                 shard_num = int(f.read())
             with fs.open(os.path.join(ckpt_dir, f"io_state_{shared_id}.pt"), "rb") as f:
@@ -388,36 +636,52 @@ class Saver:
                     logger.info(f"No io state found for dataset: {io_name}")
         else:
             logger.info("No need to load io state")
-        for key, value in self._extra_save_dict.items():
-            if key in extra_data:
-                if hasattr(value, "load_state_dict"):
-                    value.load_state_dict(extra_data[key])
-                elif isinstance(value, torch.Tensor):
-                    value.copy_(extra_data[key])
-                else:
-                    value = extra_data[key]
-                self._extra_save_dict[key] = value
 
-    def load_sparse_optim(self):
-        """Load sparse optimizer state from checkpoint."""
-        if self._sparse_optim:
-            logger.info("Load sparse optim")
-            self._sparse_optim.load_state_dict(self._sparse_optim_state)
+        extra_data = load_pt_file(ckpt_dir, "extra")
+        if len(extra_data) == 0:
+            logger.warning(f"No extra data found in {ckpt_dir}")
+            return
+
+        if ExtraFields.prev_optim in extra_data:
+            extra_data[ExtraFields.recis_dense_optim] = extra_data.pop(
+                ExtraFields.prev_optim
+            )
+
+        for key, value in self._extra_save_dict.items():
+            if key not in model_bank_conf:
+                logger.info(
+                    f"Skip loading {key} because it is not in model bank config"
+                )
+                continue
+
+            if key not in extra_data:
+                logger.warning(f"No {key} found in {ckpt_dir} when load extra params")
+                continue
+
+            data = extra_data[key]
+            if hasattr(value, "load_state_dict"):
+                logger.info(f"Load dense optimizer from {ckpt_dir}")
+                value.load_state_dict(data)
+            elif isinstance(value, torch.Tensor):
+                value.copy_(data)
+            else:
+                value = data
+            self._extra_save_dict[key] = value
 
     def load(
         self,
         ckpt_path: Optional[str] = None,
         ckpt_id: Optional[str] = None,
-        load_conf: Optional[dict] = None,
         direct_path=False,
+        model_bank_conf: Optional[dict] = None,
     ):
-        if load_conf is None:
-            load_conf = {}
+        if model_bank_conf is None:
+            model_bank_conf = {}
         if direct_path:
             ckpt_path = ckpt_path
             if not ckpt_path:
                 return
-            logger.info(f"Load checkpoint conf {load_conf} from {ckpt_path}")
+            logger.info(f"Load checkpoint from {ckpt_path}")
         else:
             ckpt_path = self._output_dir if not ckpt_path else ckpt_path
             fs = get_file_system(ckpt_path)
@@ -436,52 +700,34 @@ class Saver:
                 else:
                     logger.info(f"Checkpoint not found in {ckpt_path}")
                     return
+            logger.info(f"Load checkpoint from {ckpt_path}")
             ckpt_path = os.path.join(ckpt_path, ckpt_id)
-            logger.info(f"Load checkpoint conf {load_conf} from {ckpt_path}")
-        self.load_by_config(ckpt_path, load_conf, self._shard_id)
+        self.load_by_config(ckpt_path, self._shard_id, model_bank_conf)
 
     def load_by_config(
-        self, ckpt_path: str, load_conf: Optional[dict] = None, shared_id: int = 0
+        self,
+        ckpt_path: str,
+        shared_id: int = 0,
+        model_bank_conf: Optional[dict] = None,
     ):
-        # TODO update real load for model bank
-        if load_conf is None:
-            load_conf = {}
-        if not load_conf:
-            load_conf = {}
-        load_map = {
-            "sparse": False,
-            "dense": False,
-            "extra": False,
-            "sparse_opt": False,
-            "io_state": False,
+        if model_bank_conf is None:
+            model_bank_conf = {}
+        assert len(model_bank_conf) > 0, "Model bank config is empty"
+
+        sparse_model_bank = {
+            k: v for k, v in model_bank_conf.items() if k in self._sparse_names
         }
-        for load in load_conf.get("load", ["*"]):
-            if load == "*":
-                load_map["sparse"] = True
-                load_map["dense"] = True
-                load_map["extra"] = True
-                load_map["sparse_opt"] = True
-                load_map["io_state"] = True
-            else:
-                load_map[load] = True
-        for exclude in load_conf.get("exclude", []):
-            if exclude == "*":
-                load_map["sparse"] = False
-                load_map["dense"] = False
-                load_map["extra"] = False
-                load_map["sparse_opt"] = False
-                load_map["io_state"] = False
-            else:
-                load_map[exclude] = False
-        strict = load_conf.get("strict", True)
-        if load_map["sparse"] and len(self._sparse_state_dict.keys()) > 0:
-            self.load_sparse_params(ckpt_path)
-        if load_map["dense"] and len(self._dense_state_dict.keys()) > 0:
-            self.load_dense_params(ckpt_path, strict=strict)
-        if load_map["extra"] and len(self._extra_save_dict.keys()) > 0:
-            self.load_extra_params(ckpt_path, load_map["io_state"], shared_id)
-        if load_map["sparse_opt"] and len(self._sparse_optim_state.keys()) > 0:
-            self.load_sparse_optim()
+        self.load_sparse_params(ckpt_path, sparse_model_bank)
+
+        dense_model_bank = {
+            k: v for k, v in model_bank_conf.items() if k in self._dense_names
+        }
+        self.load_dense_params(ckpt_path, dense_model_bank)
+
+        extra_set = set(self._extra_save_dict.keys())
+        extra_set.update(ExtraFields.get_io_fields())
+        extra_model_bank = {k: v for k, v in model_bank_conf.items() if k in extra_set}
+        self.load_extra_params(ckpt_path, extra_model_bank, shared_id)
 
     def get_extra_data(self, name: str):
         if name in self._extra_save_dict:
@@ -489,20 +735,53 @@ class Saver:
         else:
             return None
 
-    def restore(self):
-        # load model bank
-        if self._model_bank:
-            for mbc in self._model_bank:
-                path = mbc["path"]
-                if path is not None and path.startswith("model."):
-                    assert Mos is not None, (
-                        "Cannot import mos, check interneal version."
-                    )
-                    path = Mos(path, True).real_physical_path
-                self.load(ckpt_path=path, load_conf=mbc, direct_path=True)
-        # load outputdir
-        self.load()
+    def _clear_hashtables_if_needed(self, var_config_dict: dict):
+        """Clear hashtables for variables that require it."""
+        for var_name, var_config in var_config_dict.items():
+            if var_config.get("hashtable_clear", False):
+                sparse_params = filter_out_sparse_param(self._model)
+                for ht_name, hashtable_obj in sparse_params.items():
+                    if (
+                        var_name.startswith(ht_name)
+                        or var_name.replace("@*", "") == ht_name
+                    ):
+                        if hasattr(hashtable_obj, "clear"):
+                            logger.info(
+                                f"Clearing hashtable: {ht_name} for variable: {var_name}"
+                            )
+                            hashtable_obj.clear_child(ht_name)
+
+    def _load_variables(self, model_bank: dict):
+        for path, vars in model_bank.items():
+            ckpt_path = get_update_path(path)
+            if ckpt_path == "":
+                raise ValueError(f"No update path found in {path}")
+
+            # Create model_bank_conf for only vars
+            var_config_dict = {}
+            for var_name in vars:
+                var_config_dict[var_name] = vars[var_name]
+            # Clear hashtables if needed
+            self._clear_hashtables_if_needed(var_config_dict)
+
+            self.load(
+                ckpt_path=ckpt_path,
+                model_bank_conf=var_config_dict,
+                direct_path=True,
+            )
 
     def update_load(self):
-        # load dynamic model banks
-        pass
+        if self._has_bank:
+            if len(self._dynamic_model_bank) > 0:
+                logger.info("Starting update_load")
+                self._load_variables(self._dynamic_model_bank)
+                return
+        logger.info("No dynamic model bank provided, skip load model")
+
+    def restore(self):
+        if self._has_bank:
+            if len(self._all_model_bank) > 0:
+                logger.info("Starting init_reload")
+                self._load_variables(self._all_model_bank)
+                return
+        logger.info("No model bank provided, skip load model")

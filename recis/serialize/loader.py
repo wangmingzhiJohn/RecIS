@@ -3,6 +3,10 @@ from typing import Optional
 
 import torch
 
+from recis.utils.logger import Logger
+
+
+logger = Logger(__name__)
 from recis.metrics.metric_reporter import LOAD_SIZE_NAME, LOAD_TIME_NAME, MetricReporter
 
 
@@ -76,5 +80,6 @@ class Loader:
         """
         load_info = json.loads(self._impl.default_load_info())
         load_info = self._filter_func(load_info)
+        logger.info(json.dumps(load_info, indent=4))
         load_size = self._impl.load(json.dumps(load_info))
         MetricReporter.report(LOAD_SIZE_NAME, load_size, force=True)
