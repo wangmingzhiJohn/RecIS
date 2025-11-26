@@ -8,7 +8,7 @@ from recis.hooks.hook import Hook
 class CheckpointSaveArguments:
     save_steps: Optional[int] = 100
     save_windows: Optional[int] = 1
-    save_epochs: Optional[int] = 1
+    save_epochs: Optional[int] = None
     save_end: bool = True
 
 
@@ -35,6 +35,10 @@ class CheckpointSaveHook(Hook):
         self.step = global_step
         self.window = 0
         self.epoch = epoch
+
+    def window_mode(self, *args, **kwargs):
+        self.args.save_steps = None
+        self.args.save_end = False
 
     def after_step(
         self, label_key=None, label_value=None, is_train=True, *args, **kwargs

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -22,6 +22,7 @@ from recis.hooks.checkpoint_hooks import (
     CheckpointSaveHook,
 )
 from recis.hooks.metric_report_hook import MetricReportHook
+from recis.metrics.metric_reporter import MODEL_FWD_NAME, MetricReporter
 from recis.optim import sparse_optim
 from recis.utils.data_utils import copy_data_to_device
 from recis.utils.logger import Logger
@@ -70,10 +71,12 @@ class TrainingArguments:
     save_concurrency_per_rank: int = 4
     save_every_n_windows: int = 1
     save_every_n_epochs: Optional[int] = None
+    save_end: Optional[bool] = True
     load_update_steps: Optional[int] = None
     load_update_windows: Optional[int] = 1
     load_update_epochs: Optional[int] = None
-    params_not_save: Optional[Dict[str, torch.Tensor]] = None
+    params_not_save: Optional[List[str]] = None
+    save_filter_fn: Optional[Callable] = None
     saver_option: Optional[SaverOptions] = None
     ckpt_save_arg: Optional[CheckpointSaveArguments] = None
     ckpt_load_arg: Optional[CheckpointLoadArguments] = None
@@ -199,6 +202,7 @@ class Trainer:
         ) = self.accelerator.prepare(
             self.model, self.dense_optimizer, self.dense_lr_scheduler
         )
+        MetricReporter.report_forward(self.model, MODEL_FWD_NAME)
         if self.sparse_optimizer is not None:
             # Set sparse grad accumulation steps to 1 because Accelerator already handles loss scaling when backward
             # The sparse optimizer should not scale gradients again to avoid double scaling.
@@ -247,27 +251,35 @@ class Trainer:
                     args.max_to_keep,
                     args.save_concurrency_per_rank,
                     args.params_not_save,
+                    args.save_filter_fn,
                 )
             saver = Saver(saver_option)
         return saver
 
     def init_hooks(self):
         self.hooks.append(LoggerHook(self.args.log_steps))
-        ckpt_save_arg = CheckpointSaveArguments(
-            self.args.save_steps,
-            self.args.save_every_n_windows,
-            self.args.save_every_n_epochs,
-        )
+        if self.args.ckpt_save_arg is not None:
+            ckpt_save_arg = self.args.ckpt_save_arg
+        else:
+            ckpt_save_arg = CheckpointSaveArguments(
+                self.args.save_steps,
+                self.args.save_every_n_windows,
+                self.args.save_every_n_epochs,
+                self.args.save_end,
+            )
         self.hooks.append(
             CheckpointSaveHook(
                 self.saver, self._global_step, self._epoch, ckpt_save_arg
             )
         )
-        ckpt_load_arg = CheckpointLoadArguments(
-            self.args.load_update_steps,
-            self.args.load_update_windows,
-            self.args.load_update_epochs,
-        )
+        if self.args.ckpt_load_arg is not None:
+            ckpt_load_arg = self.args.ckpt_load_arg
+        else:
+            ckpt_load_arg = CheckpointLoadArguments(
+                self.args.load_update_steps,
+                self.args.load_update_windows,
+                self.args.load_update_epochs,
+            )
         self.hooks.append(
             CheckpointLoadHook(
                 self.saver, self._global_step, self._epoch, ckpt_load_arg
@@ -308,6 +320,8 @@ class Trainer:
             hook.start(is_train=True)
         if hasattr(self.train_dataset, "_window_paths"):
             train_loop_fn = self._train_loop_by_window
+            for hook in self.hooks:
+                hook.window_mode()
         else:
             train_loop_fn = self._train_loop
         while self._epoch < self.args.train_epoch:
@@ -334,6 +348,8 @@ class Trainer:
             hook.start(is_train=False)
         if hasattr(self.eval_dataset, "_window_paths"):
             eval_loop_fn = self._eval_loop_by_window
+            for hook in self.hooks:
+                hook.window_mode()
         else:
             eval_loop_fn = self._eval_loop
         for hook in self.hooks:
@@ -359,6 +375,8 @@ class Trainer:
                 "train and eval dataset should both be window io"
             )
             loop_fn = self._train_eval_loop_by_window
+            for hook in self.hooks:
+                hook.window_mode()
         else:
             assert not hasattr(self.eval_dataset, "_window_paths"), (
                 "train and eval dataset should both not window io"
@@ -476,12 +494,14 @@ class Trainer:
         while True:
             if max_steps is not None and lstep >= max_steps:
                 break
+            for hook in self.hooks:
+                hook.before_step(is_train=False)
             stop_flag, data = next(data_iter)
             need_break = self.sync_exit_flag(stop_flag)
             if need_break:
+                for hook in self.hooks:
+                    hook.out_off_data()
                 break
-            for hook in self.hooks:
-                hook.before_step(is_train=False)
             if self.data_to_cuda:
                 data = copy_data_to_device(data, "cuda")
             for hook in self.hooks:
@@ -501,12 +521,14 @@ class Trainer:
         while True:
             if max_steps is not None and lstep >= max_steps:
                 break
+            for hook in self.hooks:
+                hook.before_step(is_train=True)
             stop_flag, data = next(data_iter)
             need_break = self.sync_exit_flag(stop_flag)
             if need_break:
+                for hook in self.hooks:
+                    hook.out_off_data()
                 break
-            for hook in self.hooks:
-                hook.before_step(is_train=True)
             if self.data_to_cuda:
                 data = copy_data_to_device(data, "cuda")
             for hook in self.hooks:

@@ -3,7 +3,7 @@ import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from functools import partial
-from typing import Dict, Optional
+from typing import Callable, List, Optional
 
 import torch
 
@@ -120,8 +120,8 @@ class SaverOptions:
     model_bank: Optional[list] = None
     max_keep: int = 1
     concurrency: int = 4
-    # TODO(yuhuan.zh) enable param not save
-    params_not_save: Optional[Dict[str, torch.Tensor]] = None
+    params_not_save: Optional[List[str]] = None
+    save_filter_fn: Optional[Callable] = None
 
 
 class Saver:
@@ -184,6 +184,7 @@ class Saver:
             self._sparse_optim_state = self._sparse_optim.state_dict()
             self._sparse_state_dict.update(self._sparse_optim_state)
         self._concurrency = options.concurrency
+        self._sparse_filter_fn = self.build_sparse_filter_fn(options)
         self._io_state = {}
 
         self._dense_names = self._get_dense_names()
@@ -210,6 +211,21 @@ class Saver:
             logger.warning("No model bank provided, use default model bank")
             self._model_bank_content = []
         self._init_model_bank(self._model_bank_content)
+
+    def build_sparse_filter_fn(self, args):
+        def filter_fn(blocks):
+            if args.params_not_save is not None:
+                filtered_blocks = set()
+                params_not_save = set(args.params_not_save)
+                for block in blocks:
+                    if block.tensor_name() in params_not_save:
+                        filtered_blocks.add(block)
+                blocks = list(set(blocks) - filtered_blocks)
+            if args.save_filter_fn is not None:
+                blocks = args.save_filter_fn(blocks)
+            return blocks
+
+        return filter_fn
 
     def _check_name_conflict(self):
         dense_names = set()
@@ -488,6 +504,7 @@ class Saver:
             hashtables=sparse_state_dict,
             tensors=dense_state_dict,
             path=ckpt_path,
+            filter_func=self._sparse_filter_fn,
         )
         saver.save()
         sync_func()

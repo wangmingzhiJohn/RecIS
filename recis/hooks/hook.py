@@ -31,6 +31,15 @@ class Hook:
         >>> trainer.add_hook(custom_hook)
     """
 
+    def window_mode(self, *args, **kwargs):
+        """Called when use window io mode.
+
+        Change arguments for window io run mode.
+        """
+
+    def out_off_data(self, *args, **kwargs):
+        """Called when out off data iterator."""
+
     def before_epoch(self, is_train=True, *args, **kwargs):
         """Called before each training epoch starts.
 

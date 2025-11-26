@@ -102,6 +102,11 @@ class MetricReportHook(Hook):
         MetricReporter.set_reportable(False)
         self.activate = False
 
+    def out_off_data(self, *args, **kwargs):
+        self._reset()
+        MetricReporter.set_reportable(False)
+        self.activate = False
+
     def after_data(self, is_train=True, *args, **kwargs):
         if self.activate:
             eclapsed_time = (time.time() - self.step_time) * 1000
