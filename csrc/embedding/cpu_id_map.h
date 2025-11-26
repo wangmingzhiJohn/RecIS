@@ -20,6 +20,8 @@ class CpuIdMap : public IdMap {
   std::pair<torch::Tensor, torch::Tensor> SnapShot() override;
   void Clear() override;
   void Reserve(size_t id_size) override;
+  int64_t Size() const override;
+  int64_t Capacity() const override;
   ~CpuIdMap();
 
  private:

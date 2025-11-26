@@ -112,6 +112,7 @@ TORCH_LIBRARY(recis, m) {
       .def("delete", &Hashtable::Delete)
       .def("ids_map", &Hashtable::ids_map)
       .def("id_info", &Hashtable::id_info)
+      .def("allocator_id_info", &Hashtable::allocator_id_info)
       .def("id_memory_info", &Hashtable::id_memory_info)
       .def("emb_memory_info", &Hashtable::emb_memory_info)
       .def_readonly("hashtable_tag", &Hashtable::kNullIndex);

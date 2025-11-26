@@ -20,14 +20,15 @@ struct Slot : public torch::CustomClassHolder {
        at::intrusive_ptr<recis ::embedding::Generator> generator);
   void IncrementBlock();
   void Clear();
-  int64_t BlockSize();
+  int64_t BlockSize() const;
+  int64_t Bytes() const;
   const std::string &Name();
   std::shared_ptr<std::vector<torch::Tensor>> Values();
   std::vector<torch::Tensor> ValuesDeref();
   torch::Dtype Dtype();
   torch::TensorOptions TensorOptions();
-  int64_t FlatSize();
-  std::vector<int64_t> FullShape(int64_t block_size);
+  int64_t FlatSize() const;
+  std::vector<int64_t> FullShape(int64_t block_size) const;
   at::intrusive_ptr<recis::embedding::Generator> Generator();
   void Generator(at::intrusive_ptr<recis::embedding::Generator> generator);
   torch::Tensor Value();
@@ -76,9 +77,9 @@ struct SlotGroup : public torch::CustomClassHolder {
   torch::intrusive_ptr<Slot> EmbSlot();
   std::vector<torch::intrusive_ptr<Slot>> Slots();
 
-  int64_t BlockSize();
-  int64_t BlockNum();
-  int64_t GroupSize();
+  int64_t BlockSize() const;
+  int64_t BlockNum() const;
+  int64_t GroupSize() const;
 
  private:
   int64_t block_size_;

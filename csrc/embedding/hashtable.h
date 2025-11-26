@@ -77,18 +77,26 @@ class Hashtable : public torch::CustomClassHolder {
   }
 
   std::tuple<int64_t, int64_t> id_info() {
-    // TODO(mingjie)
-    return std::make_tuple(0, 0);
+    int64_t size = id_map_->Size();
+    int64_t capacity = id_map_->Capacity();
+    return std::make_tuple(size, capacity);
   }
 
-  int64_t id_memory_info() {
-    // TODO(mingjie)
-    return 0;
+  std::tuple<int64_t, int64_t> allocator_id_info() {
+    int64_t active_size = id_map_->GetActiveIdNum();
+    int64_t total_size = id_map_->GetIdNum();
+    return std::make_tuple(active_size, total_size);
   }
+
+  int64_t id_memory_info() { return id_map_->Capacity() * sizeof(int64_t) * 2; }
 
   std::tuple<int64_t, int64_t> emb_memory_info() {
-    // TODO(mingjie)
-    return std::make_tuple(0, 0);
+    int64_t emb_memory = slot_group_->EmbSlot()->Bytes();
+    int64_t total_memory = 0;
+    for (auto &slot : slot_group_->Slots()) {
+      total_memory += slot->Bytes();
+    }
+    return std::make_tuple(emb_memory, total_memory);
   }
 
   static int64_t EncodeIdWithMask(int64_t id, int64_t mask_id);

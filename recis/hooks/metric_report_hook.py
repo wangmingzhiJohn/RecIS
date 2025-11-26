@@ -6,6 +6,8 @@ from recis.hooks.hook import Hook
 from recis.metrics.metric_reporter import (
     EVAL_QPS_NAME,
     HT_ALL_SLOT_BYTES,
+    HT_ALLOCATOR_ID_ACT_SIZE,
+    HT_ALLOCATOR_ID_TOTAL_SIZE,
     HT_EMB_BYTES,
     HT_ID_ACT_SIZE,
     HT_ID_TOTAL_BYTES,
@@ -58,6 +60,15 @@ class MetricReportHook(Hook):
             MetricReporter.report(HT_ID_ACT_SIZE, act_num, {"recis_ht_name": ht_name})
             MetricReporter.report(
                 HT_ID_TOTAL_SIZE, total_num, {"recis_ht_name": ht_name}
+            )
+            allocator_act_num, allocator_total_num = ht.allocator_id_info()
+            MetricReporter.report(
+                HT_ALLOCATOR_ID_ACT_SIZE, allocator_act_num, {"recis_ht_name": ht_name}
+            )
+            MetricReporter.report(
+                HT_ALLOCATOR_ID_TOTAL_SIZE,
+                allocator_total_num,
+                {"recis_ht_name": ht_name},
             )
             total_mem = ht.id_memory_info()
             MetricReporter.report(

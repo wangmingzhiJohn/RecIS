@@ -126,6 +126,10 @@ void GpuIdMap::Reserve(size_t id_size) {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for GpuIdMap::Reserve");
 }
 
+int64_t GpuIdMap::Size() const { return ids_map_->size(); }
+
+int64_t GpuIdMap::Capacity() const { return ids_map_->capacity(); }
+
 GpuIdMap::~GpuIdMap() { Clear(); }
 
 torch::intrusive_ptr<IdMap> MakeGpuIdMap(torch::Device id_device) {

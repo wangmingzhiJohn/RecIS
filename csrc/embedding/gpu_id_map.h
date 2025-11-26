@@ -26,6 +26,8 @@ class GpuIdMap : public IdMap {
   void Clear() override;
   void Reserve(size_t id_size) override;
   // std::pair<torch::Tensor, torch::Tensor> Reserve(size_t id_size) override;
+  int64_t Size() const override;
+  int64_t Capacity() const override;
   ~GpuIdMap();
 
   using MapType = cuco::flat_hash_map<int64_t, int64_t>;

@@ -40,7 +40,18 @@ void Slot::IncrementBlock() { values_->push_back(generator_->Generate()); }
 
 void Slot::Clear() { values_->clear(); }
 
-int64_t Slot::BlockSize() { return block_size_; }
+int64_t Slot::BlockSize() const { return block_size_; }
+
+int64_t Slot::Bytes() const {
+  if (!values_ || values_->empty()) {
+    return 0;
+  }
+  int64_t total_memory = 0;
+  for (const auto &tensor : *values_) {
+    total_memory += tensor.numel() * tensor.element_size();
+  }
+  return total_memory;
+}
 
 const std::string &Slot::Name() { return name_; }
 
@@ -60,9 +71,9 @@ torch::TensorOptions Slot::TensorOptions() {
   return torch::TensorOptions().dtype(dtype_).device(device);
 }
 
-int64_t Slot::FlatSize() { return flat_size_; }
+int64_t Slot::FlatSize() const { return flat_size_; }
 
-std::vector<int64_t> Slot::FullShape(int64_t block_size) {
+std::vector<int64_t> Slot::FullShape(int64_t block_size) const {
   std::vector<int64_t> full_shape(partial_shape_);
   full_shape[0] = block_size;
   return full_shape;
@@ -196,9 +207,11 @@ torch::intrusive_ptr<Slot> SlotGroup::EmbSlot() {
 }
 
 std::vector<torch::intrusive_ptr<Slot>> SlotGroup::Slots() { return slots_; }
-int64_t SlotGroup::BlockSize() { return block_size_; }
-int64_t SlotGroup::BlockNum() { return block_num_; }
-int64_t SlotGroup::GroupSize() { return static_cast<int64_t>(slots_.size()); }
+int64_t SlotGroup::BlockSize() const { return block_size_; }
+int64_t SlotGroup::BlockNum() const { return block_num_; }
+int64_t SlotGroup::GroupSize() const {
+  return static_cast<int64_t>(slots_.size());
+}
 
 }  // namespace embedding
 }  // namespace recis

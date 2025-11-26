@@ -181,6 +181,10 @@ void CpuIdMap::Clear() {
 
 void CpuIdMap::Reserve(size_t id_size) { ids_map_.reserve(id_size); }
 
+int64_t CpuIdMap::Size() const { return ids_map_.size(); }
+
+int64_t CpuIdMap::Capacity() const { return ids_map_.bucket_count(); }
+
 CpuIdMap::~CpuIdMap() { Clear(); }
 
 torch::intrusive_ptr<IdMap> MakeCpuIdMap(torch::Device id_device) {
