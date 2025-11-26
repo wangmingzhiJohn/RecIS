@@ -24,6 +24,20 @@ std::string FullJsonFileName(const std::string &path) {
   return io::JoinPath(path, "torch_rank_weights_embs_table_multi_shard.json");
 }
 
+std::string FullTorchRankJsonNameTmp(const int64_t shard_index,
+                                     const std::string &path) {
+  return io::JoinPath(path,
+                      std::to_string(shard_index) +
+                          "torch_rank_weights_embs_table_multi_shard.json");
+}
+
+std::string IndexTorchRankJsonNameTmp(const int64_t shard_index,
+                                      const std::string &path) {
+  return io::JoinPath(path,
+                      std::to_string(shard_index) +
+                          "torch_rank_weights_embs_table_multi_shard.json");
+}
+
 std::string FullTensorKeyJsonFileNameTmp(const std::string &path,
                                          int64_t shard_idx) {
   return io::JoinPath(path, std::to_string(shard_idx) + "tensorkey.json");
@@ -106,8 +120,8 @@ std::string DataJsonName(int64_t shard_index, int64_t thread_idx) {
   return buffer.c_str();
 }
 
-std::string IndexJsonName(const std::string &path, int64_t shard_index,
-                          int64_t thread_idx) {
+std::string IndexTorchRankJsonName(const std::string &path, int64_t shard_index,
+                                   int64_t thread_idx) {
   std::string buffer(100, ' ');
   const char *fmt = "ckpt-%07lld-%07lld.json";
   auto ret =

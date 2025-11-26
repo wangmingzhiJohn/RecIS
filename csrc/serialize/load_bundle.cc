@@ -78,6 +78,8 @@ at::intrusive_ptr<TableReader> LoadBundle::BlockReadFile(
 
 void LoadBundle::GetTensorNameMap() {
   auto middle_json_file = FullTensorKeyJsonFileName(path_);
+  TORCH_CHECK(Env::Default()->FileExists(middle_json_file).ok(), "[",
+              middle_json_file, "] not found");
   uint64_t file_size;
   Env::Default()->GetFileSize(middle_json_file, &file_size);
   std::unique_ptr<RandomAccessFile> file;

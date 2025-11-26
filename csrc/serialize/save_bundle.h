@@ -26,6 +26,7 @@ class SaveBundle : public at::intrusive_ptr_target {
   void SaveMeta();
   void SaveTables();
   void MergeTorchRankJson();
+  void MergeParallelTorchRankJson(const int valid_num);
   void MergeTensorKeyJson();
   void MergeJsonInfo();
   void InitTypeMap();
