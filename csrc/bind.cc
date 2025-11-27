@@ -195,6 +195,7 @@ TORCH_LIBRARY(recis, m) {
   m.def("fused_multi_hash", recis::functional::fused_multi_hash);
   m.def("gauc_calc", recis::functional::GaucCalc);
   m.def("adam_tf_apply", recis::functional::adam_tf_apply);
+  m.def("fused_adamw_tf_apply", recis::functional::fused_adamw_tf_apply);
   m.def("segment_mean", recis::functional::segment_mean);
   m.def("segment_sum", recis::functional::segment_sum);
 

@@ -349,23 +349,21 @@ def _fuse_tensor_adamwtf(
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
 
-    for i, param in enumerate(params):
-        grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
-        step_t = state_steps[i]
+    for i in range(len(grads)):
+        grads[i] = grads[i] if not maximize else -grads[i]
 
-        assert not torch.is_complex(param)
-        step_t += 1
-        step = _get_value(step_t)
-        lr_scalar = maybe_get_value(lr)
-        # Perform stepweight decay
-        param.mul_(1 - weight_decay)
-
-        # Decay the first and second moment running average coefficient
-        torch.ops.recis.adam_tf_apply(
-            param, grad, exp_avg, exp_avg_sq, step, lr_scalar, beta1, beta2, eps
-        )
+    torch.ops.recis.fused_adamw_tf_apply(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        state_steps,
+        weight_decay,
+        lr,
+        beta1,
+        beta2,
+        eps,
+    )
 
 
 def _single_tensor_adamwtf(
