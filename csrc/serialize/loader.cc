@@ -66,8 +66,10 @@ int64_t Loader::Load(std::string load_info) {
   auto load_bundle = LoadBundle::Make(path_);
   auto loader_internal = LoaderInternal::Make(
       load_info_obj, load_bundle, hts_to_load_, tensors_to_load_, parallel_);
-  loader_internal->Load();
-  return 0;
+
+  int64_t load_size = 0;
+  loader_internal->Load(load_size);
+  return load_size;
 }
 
 Loader::~Loader() {}

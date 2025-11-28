@@ -10,6 +10,7 @@
 #include "embedding/slot_group.h"
 #include "platform/filesystem.h"
 #include "serialize/block_info.h"
+#include "serialize/count_metric.h"
 #include "serialize/table_reader.h"
 #include "torch/extension.h"
 namespace recis {
@@ -18,6 +19,7 @@ class ReadBlock : public torch::CustomClassHolder {
  public:
   virtual void Read() = 0;
   virtual ~ReadBlock() = default;
+  static SizeCounter size_counter_;
 };
 
 class TensorReadBlock : public ReadBlock {

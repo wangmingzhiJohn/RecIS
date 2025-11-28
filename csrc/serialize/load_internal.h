@@ -17,7 +17,7 @@ class LoaderInternal : public at::intrusive_ptr_target {
       const std::unordered_map<std::string, HashTablePtr> &hts_to_load,
       const std::unordered_map<std::string, at::Tensor> &tensors_to_load,
       int64_t parallel);
-  void Load();
+  void Load(int64_t &load_size);
 
  private:
   void BuildHTLoadCollection(

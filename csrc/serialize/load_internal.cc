@@ -192,7 +192,9 @@ void LoaderInternal::BuildTensorLoadCollection(
   LOG(WARNING) << " Load Dense Meta Info Complete";
 }
 
-void LoaderInternal::Load() {
+void LoaderInternal::Load(int64_t &load_size) {
+  ReadBlock::size_counter_.InitCounter();
+
   if (ht_load_collections_.empty() && tensor_read_blocks_.empty()) {
     return;
   }
@@ -270,6 +272,7 @@ void LoaderInternal::Load() {
   }
   pool.waitWorkComplete();
   LOG(WARNING) << " Load Dense Tensor Complete";
+  load_size = ReadBlock::size_counter_.GetSize();
 }
 }  // namespace serialize
 }  // namespace recis

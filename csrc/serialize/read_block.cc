@@ -31,6 +31,8 @@
 namespace recis {
 namespace serialize {
 
+SizeCounter ReadBlock::size_counter_;
+
 at::intrusive_ptr<TensorReadBlock> TensorReadBlock::Make(
     at::Tensor dst_tensor, at::intrusive_ptr<BlockInfo> block_info,
     at::intrusive_ptr<TableReader> table_reader) {
@@ -42,6 +44,7 @@ at::intrusive_ptr<TensorReadBlock> TensorReadBlock::Make(
 }
 
 void TensorReadBlock::Read() {
+  size_counter_.AddSize(block_info_->Size());
   // to do: tensor name and filename
   TORCH_CHECK(block_info_->Dtype() == tensor_.dtype(), "dtype not match");
   TORCH_CHECK(block_info_->Shape() == tensor_.sizes().vec(), "shape not match");
@@ -84,6 +87,7 @@ torch::Tensor HTIdReadBlock::MarkIdAcceptable(at::Tensor ids, int64_t slice_beg,
 }
 
 void HTIdReadBlock::Read() {
+  size_counter_.AddSize(block_info_->Size());
   int64_t ids_num = block_info_->Size() / sizeof(int64_t);
   torch::Tensor ids = torch::empty(
       {ids_num}, at::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
@@ -124,6 +128,7 @@ void CoalesceHTIDReadBlock::EncodeIds(at::Tensor ids,
 }
 
 void CoalesceHTIDReadBlock::Read() {
+  size_counter_.AddSize(block_info_->Size());
   int64_t ids_num = block_info_->Size() / sizeof(int64_t);
   torch::Tensor ids = torch::empty(
       {ids_num}, at::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
@@ -168,6 +173,7 @@ void HTSlotReadBlock::Read() {
   while (read_ids_num < ids_need_to_read) {
     int64_t read_size =
         std::min(read_batch_size, ids_need_to_read - read_ids_num);
+    size_counter_.AddSize(read_size * flat_nbtyes);
     torch::string_view ret;
     auto file = table_reader_->File();
     RECIS_STATUS_COND(file->Read(
@@ -216,6 +222,7 @@ c10::List<at::intrusive_ptr<at::ivalue::Future>> HTSlotReadBlock::ReadAsync(
                                     .dtype(block_info_->Dtype()));
         torch::string_view ret;
         auto file = table_reader_->File();
+        size_counter_.AddSize(read_size * flat_nbtyes);
         RECIS_STATUS_COND(file->Read(
             block_info_->OffsetBeg() + read_ids_num * flat_nbtyes,
             read_size * flat_nbtyes, &ret, (char *)slot_tensor.data_ptr()));
