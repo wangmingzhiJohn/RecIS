@@ -37,6 +37,7 @@ class ModelBankEntry:
     is_dynamic: bool = False
     hashtable_clear: bool = True
     ignore_error: bool = True
+    skip: bool = False
     oname: list[dict] = field(default_factory=list)
 
     @classmethod
@@ -50,6 +51,10 @@ class ModelBankEntry:
         return cls(**filtered_data)
 
     def __post_init__(self):
+        if self.skip:
+            logger.warning("'skip' is True, skip this model bank.")
+            return
+
         if not isinstance(self.path, str):
             raise TypeError(f"'path' must be a string, got {type(self.path).__name__}")
         if not self.path.strip():
@@ -520,7 +525,9 @@ class ModelBankParser:
         self._complete_model_bank()
         self._is_load_valid()
         self._model_bank = [
-            ModelBankEntry.from_dict(bank) for bank in self._model_bank_content
+            ModelBankEntry.from_dict(bank)
+            for bank in self._model_bank_content
+            if not bank.get("skip", False)
         ]
         self._complete_sparse_name()
         self._replace_io_fields()
