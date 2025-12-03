@@ -153,7 +153,7 @@ class DatasetBase(IterableDataset):
     - State management for resumable training
     - Both dense and ragged tensor formats
 
-    Args:
+    Attributes:
         batch_size (int): Number of samples per batch.
         worker_idx (int): Index of current worker in distributed setup. Defaults to 0.
         worker_num (int): Total number of workers in distributed setup. Defaults to 1.
@@ -170,19 +170,24 @@ class DatasetBase(IterableDataset):
         device (str): Target device for data placement ("cpu", "cuda", or "pin"). Defaults to "cpu".
 
     Example:
-        >>> # Create a custom dataset by inheriting from DatasetBase
-        >>> class MyDataset(DatasetBase):
-        ...     def make_dataset_fn(self):
-        ...         # Implement dataset creation logic
-        ...         pass
-        ...
-        ...     def _shard_path(self, sub_id, sub_num):
-        ...         # Implement path sharding logic
-        ...         pass
-        >>> # Use the dataset
-        >>> dataset = MyDataset(
-        ...     batch_size=1024, read_threads_num=4, prefetch=2, device="cuda"
-        ... )
+
+    .. code-block:: python
+
+        # Create a custom dataset by inheriting from DatasetBase
+        class MyDataset(DatasetBase):
+            def make_dataset_fn(self):
+                # Implement dataset creation logic
+                pass
+
+            def _shard_path(self, sub_id, sub_num):
+                # Implement path sharding logic
+                pass
+
+
+        # Use the dataset
+        dataset = MyDataset(
+            batch_size=1024, read_threads_num=4, prefetch=2, device="cuda"
+        )
 
     Note:
         This is an abstract base class. Subclasses must implement the `make_dataset_fn`
@@ -274,7 +279,9 @@ class DatasetBase(IterableDataset):
                 Defaults to False.
 
         Example:
-            ```python
+
+        .. code-block:: python
+
             # Sparse feature with FarmHash for large vocabularies
             dataset.varlen_feature(
                 "user_clicked_items", hash_type="farm", hash_bucket=1000000
@@ -290,7 +297,6 @@ class DatasetBase(IterableDataset):
 
             # String feature converted to int8 (for text processing)
             dataset.varlen_feature("review_tokens", trans_int8=True)
-            ```
 
         Raises:
             AssertionError: If hash_type is not "farm" or "murmur" when specified.
@@ -328,9 +334,13 @@ class DatasetBase(IterableDataset):
                 Should be a list even for scalar values.
 
         Example:
-            >>> dataset.fixedlen_feature("age", default_value=[25.0])
-            >>> dataset.fixedlen_feature("gender", default_value=[0])
-            >>> dataset.fixedlen_feature("embedding", default_value=[0.0] * 128)
+
+        .. code-block:: python
+
+            dataset.fixedlen_feature("age", default_value=[25.0])
+            dataset.fixedlen_feature("gender", default_value=[0])
+            dataset.fixedlen_feature("embedding", default_value=[0.0] * 128)
+
         """
         if name not in self._select_column:
             self._select_column.append(name)
@@ -381,10 +391,16 @@ class DatasetBase(IterableDataset):
                 a modified batch dictionary.
 
         Example:
-            >>> def normalize_features(batch):
-            ...     batch["normalized_score"] = batch["score"] / 100.0
-            ...     return batch
-            >>> dataset.map(normalize_features)
+
+        .. code-block:: python
+
+            def normalize_features(batch):
+                batch["normalized_score"] = batch["score"] / 100.0
+                return batch
+
+
+            dataset.map(normalize_features)
+
         """
         self._map_funcs.append(map_func)
 
@@ -415,10 +431,14 @@ class DatasetBase(IterableDataset):
                 a boolean indicating whether to filter out (skip) the batch.
 
         Example:
-            >>> def filter_empty_sequences(batch):
-            ...     # Skip batches where all sequences are empty
-            ...     return torch.all(batch["sequence_length"] == 0)
-            >>> dataset.filter(filter_empty_sequences)
+
+        .. code-block:: python
+            def filter_empty_sequences(batch):
+                # Skip batches where all sequences are empty
+                return torch.all(batch["sequence_length"] == 0)
+
+
+            dataset.filter(filter_empty_sequences)
         """
         self._filter_funcs.append(filter_func)
 

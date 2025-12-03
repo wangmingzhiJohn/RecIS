@@ -3,12 +3,17 @@ import re
 import time
 from typing import Optional
 
-from nebula.mos import ModelCkpt, ModelVersion
-
 from recis.utils.logger import Logger
 
 
+if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    from nebula.mos import ModelCkpt, ModelVersion
+
 logger = Logger(__name__)
+
+
+def get_model_version(mos_version_uri, user_id):
+    return ModelVersion(mos_version_uri=mos_version_uri, user_id=user_id)
 
 
 def parse_uri(uri, auto_version=False):

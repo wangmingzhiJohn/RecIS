@@ -12,23 +12,6 @@ class Hook:
     - Epoch lifecycle: before_epoch, after_epoch
     - Step lifecycle: before_step, after_step
     - Cleanup: end
-
-    Example:
-        Creating a custom hook:
-
-        >>> class CustomHook(Hook):
-        ...     def __init__(self, custom_param):
-        ...         self.custom_param = custom_param
-        ...
-        ...     def before_train(self):
-        ...         print(f"Training started with {self.custom_param}")
-        ...
-        ...     def after_step(self):
-        ...         # Custom logic after each training step
-        ...         pass
-        >>> # Use the custom hook
-        >>> custom_hook = CustomHook("my_parameter")
-        >>> trainer.add_hook(custom_hook)
     """
 
     def window_mode(self, *args, **kwargs):

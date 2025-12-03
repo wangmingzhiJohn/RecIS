@@ -23,59 +23,51 @@ Core Features
    - Multi-worker data sharding
    - State saving and recovery mechanisms
 
-.. currentmodule:: recis.io
-
 Dataset Classes
 ---------------
 
+DatasetBase
+~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: recis.io.dataset_base
+
+.. autoclass:: DatasetBase
+   :members: __init__, varlen_feature, fixedlen_feature, dump_io_state, load_io_state, reset
+
 OrcDataset
-~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: recis.io
 
 .. autoclass:: OrcDataset
+   :members: __init__, add_path, add_paths, get_table_size
 
-   :members: __init__, add_path, add_paths, varlen_feature, fixedlen_feature
+OdpsDataset
+~~~~~~~~~~~~~~~~~~~~
 
-Best Practices
---------------
+.. currentmodule:: recis.io
 
-1. **Reasonable Parameter Settings**:
+.. autoclass:: OdpsDataset
+   :members: __init__, add_path, add_paths
 
-   .. code-block:: python
+LakeStreamDataset
+~~~~~~~~~~~~~~~~~~~~
 
-      dataset = OrcDataset(
-          batch_size=1024,
-          read_threads_num=2,
-          prefetch=1,           # Number of prefetch batches
-          device="cuda"         # Put batch results directly on cuda
-      )
+.. currentmodule:: recis.io
 
-2. **Using Data Preprocessing**:
+.. autoclass:: LakeStreamDataset
+   :members: __init__, add_path
 
-   .. code-block:: python
+.. _window_io:
 
-      def transform_batch(batch):
-          # Custom batch processing logic
-          return processed_batch
-      
-      dataset = OrcDataset(
-          batch_size=1024,
-          transform_fn=transform_batch
-      )
+WindowIO
+~~~~~~~~~~~~~~~~~~~~
 
-3. **Distributed Data Reading**:
+.. currentmodule:: recis.io
 
-   .. code-block:: python
+.. autofunction:: make_lake_stream_window_io
 
-      import os
-      
-      rank = int(os.environ.get("RANK", 0))
-      world_size = int(os.environ.get("WORLD_SIZE", 1))
-      
-      dataset = OrcDataset(
-          batch_size=1024,
-          worker_idx=rank,
-          worker_num=world_size
-      )
+.. autofunction:: make_odps_window_io
 
 Common Questions
 ----------------

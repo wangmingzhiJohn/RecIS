@@ -1,10 +1,14 @@
+import os
 from typing import Dict
 
-import ml_tracker
 import torch
 
 from recis.hooks import Hook
 from recis.utils.logger import Logger
+
+
+if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    import ml_tracker
 
 
 logger = Logger(__name__)

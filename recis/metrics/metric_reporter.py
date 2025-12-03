@@ -1,3 +1,4 @@
+import os
 import time
 from contextlib import contextmanager
 from functools import wraps
@@ -45,7 +46,8 @@ class MetricReporter:
     _reportable = False
     logger = Logger("Metrics Reporter")
     metric_prefix = "recis.framework"
-    metric_cli = GetFactory().get_client(metric_prefix)
+    if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+        metric_cli = GetFactory().get_client(metric_prefix)
 
     # FIXME: SingletonMeta object decorator only works in py39+ which not supported by ruff rule now
     # def __init__(self) -> None:

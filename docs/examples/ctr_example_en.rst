@@ -1,5 +1,5 @@
 CTR Example Model
-================
+================================
 
 This chapter introduces the basic usage methods of RecIS through a simple CTR model, helping beginners get started quickly and learn more feature processing usage.
 For specific training code, please refer to the examples/deepctr directory

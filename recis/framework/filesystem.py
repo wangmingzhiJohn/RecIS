@@ -6,6 +6,7 @@ as the underlying abstraction layer and automatically selects the appropriate
 filesystem based on the path protocol.
 """
 
+import os
 from pathlib import Path
 
 import fsspec
@@ -20,7 +21,7 @@ _file_system_mapper = {
 }
 
 # Add DFS support if internal features are enabled
-if is_internal_enabled():
+if is_internal_enabled() and not os.environ.get("BUILD_DOCUMENT", None) == "1":
     _file_system_mapper["dfs"] = fsspec.filesystem("dfs")
 
 

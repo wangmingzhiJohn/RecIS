@@ -1,8 +1,13 @@
-import column_io.dataset.dataset as column_io_dataset
+import os
+
 import torch
-from column_io.dataset.file_sharding import LakeStreamSharding
 
 from recis.io.dataset_base import DatasetBase
+
+
+if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    import column_io.dataset.dataset as column_io_dataset
+    from column_io.dataset.file_sharding import LakeStreamSharding
 
 
 class LakeStreamDataset(DatasetBase):
@@ -27,7 +32,8 @@ class LakeStreamDataset(DatasetBase):
     Example:
         Creating and configuring a Lake stream dataset:
 
-        ```python
+    .. code-block:: python
+
         # Initialize dataset with prefetching
         dataset = LakeStreamDataset(
             batch_size=512,
@@ -43,7 +49,7 @@ class LakeStreamDataset(DatasetBase):
         # Add stream sources with time ranges
         dataset.add_path("/lake/user_events", begin=1640995200, end=1641081600)
         dataset.add_path("/lake/item_updates", begin=1640995200, end=1641081600)
-        ```
+
     """
 
     def __init__(
@@ -161,14 +167,16 @@ class LakeStreamDataset(DatasetBase):
             end (int): End timestamp for data selection (Unix timestamp).
 
         Example:
-            ```python
+
+        .. code-block:: python
+
             # Add stream for last 24 hours
             dataset.add_path(
                 "/lake/user_behavior_stream",
                 begin=1640995200,  # 2022-01-01 00:00:00
                 end=1641081600,  # 2022-01-02 00:00:00
             )
-            ```
+
 
         Note:
             The time range allows for precise control over which portion of

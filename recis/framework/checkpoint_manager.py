@@ -25,7 +25,7 @@ from recis.serialize import Loader as SLoader, Saver as SSaver
 from recis.utils.logger import Logger
 
 
-if is_internal_enabled():
+if is_internal_enabled() and not os.environ.get("BUILD_DOCUMENT", None) == "1":
     from pangudfs_client.common.exception.exceptions import PanguException
 
     from recis.utils.mos import Mos

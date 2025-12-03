@@ -9,6 +9,7 @@ RecIS provides rich API interfaces. This section details the usage of each modul
    io
    features
    nn/index
+   fg
    metrics
    hooks
    optim
@@ -31,6 +32,8 @@ Core Module Overview
      - Feature engineering module, supports feature processing and transformation
    * - :doc:`nn/index`
      - Model-related modules, including dynamic embedding and special operators provided by recis
+   * - :doc:`fg`
+     - Feature Generator modules
    * - :doc:`metrics`
      - Evaluation metrics, including AUC, GAUC and other commonly used metrics in recommendation systems
    * - :doc:`hooks`

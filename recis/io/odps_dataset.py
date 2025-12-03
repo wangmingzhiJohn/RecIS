@@ -1,6 +1,6 @@
-import column_io.dataset.dataset as column_io_dataset
+import os
+
 import torch
-from column_io.dataset.file_sharding import OdpsTableSharding
 
 
 try:
@@ -24,14 +24,20 @@ from recis.io.dataset_base import DatasetBase
 from recis.utils.logger import Logger
 
 
+if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    import column_io.dataset.dataset as column_io_dataset
+    from column_io.dataset.file_sharding import OdpsTableSharding
+
+
 logger = Logger(__name__)
 
-# Automatically select the appropriate ODPS dataset backend
-if is_turn_on_odps_open_storage():
-    odps_dataset_func = column_io_dataset.OdpsOpenStorageDataset
-else:
-    odps_dataset_func = column_io_dataset.OdpsTableColumnDataset
-odps_dataset_func.load_plugin()
+if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    # Automatically select the appropriate ODPS dataset backend
+    if is_turn_on_odps_open_storage():
+        odps_dataset_func = column_io_dataset.OdpsOpenStorageDataset
+    else:
+        odps_dataset_func = column_io_dataset.OdpsTableColumnDataset
+    odps_dataset_func.load_plugin()
 
 
 def get_table_size(table_name):
@@ -44,10 +50,12 @@ def get_table_size(table_name):
         int: The number of rows in the specified table.
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         size = get_table_size("my_project.user_behavior_table")
         print(f"Table has {size} rows")
-        ```
+
     """
     table_size = odps_dataset_func.get_table_size(table_name)
     return table_size
@@ -74,7 +82,8 @@ class OdpsDataset(DatasetBase):
     Example:
         Creating and configuring an ODPS dataset:
 
-        ```python
+    .. code-block:: python
+
         # Initialize dataset
         dataset = OdpsDataset(
             batch_size=512, worker_idx=0, worker_num=4, shuffle=True, ragged_format=True
@@ -94,7 +103,7 @@ class OdpsDataset(DatasetBase):
         # Configure dense features
         dataset.fixedlen_feature("user_age", default_value=25.0)
         dataset.fixedlen_feature("item_price", default_value=0.0)
-        ```
+
     """
 
     def __init__(
@@ -168,9 +177,11 @@ class OdpsDataset(DatasetBase):
             odps_table (str): ODPS table name in format 'project.table'.
 
         Example:
-            ```python
+
+        .. code-block:: python
+
             dataset.add_path("my_project.user_behavior_table")
-            ```
+
         """
         self._paths.append(odps_table)
         self._table_sizes.append(0)
@@ -182,7 +193,9 @@ class OdpsDataset(DatasetBase):
             odps_tables (List[str]): List of ODPS table names in format 'project.table'.
 
         Example:
-            ```python
+
+        .. code-block:: python
+
             dataset.add_paths(
                 [
                     "recommendation.user_features",
@@ -190,7 +203,7 @@ class OdpsDataset(DatasetBase):
                     "recommendation.interaction_logs",
                 ]
             )
-            ```
+
         """
         for table in odps_tables:
             self.add_path(table)
@@ -269,11 +282,13 @@ class OdpsDataset(DatasetBase):
             List[int]: List of table sizes (number of rows) corresponding to each table.
 
         Example:
-            ```python
+
+        .. code-block:: python
+
             dataset.add_paths(["project.table1", "project.table2"])
             sizes = dataset.get_table_size()
             print(f"Table sizes: {sizes}")
-            ```
+
 
         Note:
             This method may take some time to execute as it queries the ODPS

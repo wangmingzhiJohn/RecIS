@@ -6,13 +6,12 @@ from dataclasses import dataclass, field, fields
 from typing import Any, Dict, Optional, Set
 
 import torch
-from nebula.mos import ModelVersion
 from safetensors.torch import load_file
 
 from recis.framework.filesystem import get_file_system
 from recis.serialize.checkpoint_reader import CheckpointReader
 from recis.utils.logger import Logger
-from recis.utils.mos import Mos
+from recis.utils.mos import Mos, get_model_version
 
 
 logger = Logger(__name__)
@@ -182,7 +181,7 @@ def get_update_path(path) -> str:
         mos = Mos(uri)
         if mos.uri_info["ckpt_id"] is not None:
             return os.path.join(mos.real_physical_path, mos.uri_info["ckpt_id"])
-        version = ModelVersion(
+        version = get_model_version(
             mos_version_uri=uri, user_id=os.environ.get("USER_ID", None)
         )
         ckpt_list = []

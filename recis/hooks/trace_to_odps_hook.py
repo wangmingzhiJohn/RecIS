@@ -8,13 +8,16 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import torch
-from odps import ODPS
-from odps.models import Schema
-from odps.tunnel.io.writer import ArrowWriter
-from odps.tunnel.tabletunnel import TableTunnel
 
 from recis.hooks import Hook
 from recis.utils.logger import Logger
+
+
+if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    from odps import ODPS
+    from odps.models import Schema
+    from odps.tunnel.io.writer import ArrowWriter
+    from odps.tunnel.tabletunnel import TableTunnel
 
 
 logger = Logger(__name__)

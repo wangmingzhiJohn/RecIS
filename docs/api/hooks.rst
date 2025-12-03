@@ -4,8 +4,6 @@ Hook System
 Basic Hooks
 -----------
 
-
-
 RecIS provides a rich Hook system to extend the training process:
 
 .. currentmodule:: recis.hooks.hook
@@ -14,7 +12,7 @@ Hook
 ~~~~
 
 .. autoclass:: Hook
-   :members: before_train, after_train, before_step, after_step
+   :members: before_epoch, after_epoch, before_window, after_window, before_step, after_step, start, end, after_data, window_mode, out_off_data
 
 .. currentmodule:: recis.hooks.logger_hook
 
@@ -31,6 +29,34 @@ ProfilerHook
 ~~~~~~~~~~~~
 
 .. autoclass:: ProfilerHook
+   :members: __init__
+
+.. currentmodule:: recis.hooks.ml_tracker_hook
+
+MLTrackerHook
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: recis.hooks.ml_tracker_hook.add_to_ml_tracker
+
+.. autoclass:: MLTrackerHook
+   :members: __init__
+
+.. currentmodule:: recis.hooks.trace_to_odps_hook
+
+TraceToOdpsHook
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: recis.hooks.trace_to_odps_hook.add_to_trace
+
+.. autoclass:: TraceToOdpsHook
+   :members: __init__
+
+.. currentmodule:: recis.hooks.metric_report_hook
+
+MetricReportHook
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: MetricReportHook
    :members: __init__
 
 .. currentmodule:: recis.hooks.filter_hook

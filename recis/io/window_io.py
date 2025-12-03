@@ -1,15 +1,19 @@
 import logging
 import math
+import os
 import random
 import time
 from dataclasses import dataclass
 from datetime import datetime
 
 import torch
-from column_io.dataset.file_sharding import LakeStreamSharding
 
 from recis.io.lake_dataset import LakeStreamDataset
 from recis.io.odps_dataset import OdpsDataset, get_table_size
+
+
+if not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    from column_io.dataset.file_sharding import LakeStreamSharding
 
 
 logger = logging.getLogger(__name__)
@@ -28,13 +32,15 @@ class TableSheet:
         end (int): Ending row index (exclusive).
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         # Create a table sheet for rows 1000-2000
         sheet = TableSheet()
         sheet.table = "my_project.user_data"
         sheet.start = 1000
         sheet.end = 2000
-        ```
+
     """
 
     table: str
@@ -67,11 +73,13 @@ def _parse_proportion(thread_num, proportions):
         ValueError: If proportion configurations are inconsistent or invalid.
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         # Two tables with 2:1 ratio, 6 total threads
         threads, total = _parse_proportion(6, [(2, 3), (1, 3)])
         # Result: threads=[4, 2], total=6
-        ```
+
     """
     total = {t for _, t in proportions}
     if len(total) != 1:
@@ -108,11 +116,13 @@ def _build_shard(begin, length, num, extra_offset=0):
             - extra_offset (int): Updated offset for next sharding operation
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         # Divide 100 rows into 3 shards starting from row 0
         shards, offset = _build_shard(0, 100, 3)
         # Result: [(0, 34), (34, 67), (67, 100)]
-        ```
+
     """
     shards = [length // num] * num
     for i in range(length % num):
@@ -147,9 +157,11 @@ def _shard_sheets_by_split_num(
             - extra_offset (int): Updated offset for next operation
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         sheets, offset = _shard_sheets_by_split_num("project.table", 0, 4, 2, 10, 0)
-        ```
+
     """
     shard_num = task_num * thread_num * split_num
     table_size = get_table_size(table)
@@ -180,9 +192,11 @@ def _shard_sheets_by_row_num(
             - extra_offset (int): Updated offset for next operation
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         sheets, offset = _shard_sheets_by_row_num("project.table", 0, 4, 2, 10000, 0)
-        ```
+
     """
     shard_num = task_num * thread_num
     table_size = get_table_size(str(table))
@@ -213,10 +227,12 @@ def _shard_table_by_subprocess(table_sheets, sub_id, sub_num):
         List[str]: List of ODPS query strings for this subprocess.
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         queries = _shard_table_by_subprocess(sheets, 0, 2)
         # Result: ['project.table?start=0&end=500', ...]
-        ```
+
     """
     sub_sheets = []
     for table_sheet in table_sheets:
@@ -251,9 +267,11 @@ def _shard_lake_by_subprocess(lake_sheets, sub_id, sub_num):
         'main_dir|start_time;end_time|hash|worker_idx;worker_num'
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         configs = _shard_lake_by_subprocess(lake_sheets, 0, 2)
-        ```
+
     """
     if sub_num == 1:
         return lake_sheets
@@ -284,7 +302,9 @@ def make_odps_window_io(split_num=None, row_num=None):
         ValueError: If both or neither split_num and row_num are specified.
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         # Create dataset class with split-based sharding
         WindowDataset = make_odps_window_io(split_num=8)
 
@@ -301,7 +321,6 @@ def make_odps_window_io(split_num=None, row_num=None):
                     process_batch(batch)
             except StopIteration:
                 break
-        ```
 
     Note:
         Exactly one of split_num or row_num must be specified to define
@@ -346,13 +365,14 @@ def make_odps_window_io(split_num=None, row_num=None):
                 ValueError: If proportion format is invalid.
 
             Example:
-                ```python
+
+            .. code-block:: python
+
                 # Table contributes 2/3 of each batch
                 dataset.add_path("project.main_table", proportion=(2, 3))
 
                 # Table contributes 1/3 of each batch
                 dataset.add_path("project.aux_table", proportion=(1, 3))
-                ```
 
             Note:
                 All tables should have the same total_parts value for consistency.
@@ -444,11 +464,13 @@ def make_odps_window_io(split_num=None, row_num=None):
                     - read_offset: Current reading offset tensor
 
             Example:
-                ```python
+
+            .. code-block:: python
+
                 state = dataset.state_dict()
                 # Save state for resumption
                 torch.save(state, "dataset_state.pt")
-                ```
+
             """
             return {"read_offset": self._read_offset}
 
@@ -459,7 +481,9 @@ def make_odps_window_io(split_num=None, row_num=None):
                 state_dict (dict): State dictionary from previous state_dict() call.
 
             Example:
-                ```python
+
+            .. code-block:: python
+
                 # Load saved state
                 state = torch.load("dataset_state.pt")
                 dataset.load_state_dict(state)
@@ -473,7 +497,7 @@ def make_odps_window_io(split_num=None, row_num=None):
                             process_batch(batch)
                     except StopIteration:
                         break
-                ```
+
             """
             self._read_offset = state_dict["read_offset"]
 
@@ -492,7 +516,9 @@ def make_odps_window_io(split_num=None, row_num=None):
                 StopIteration: When all windows have been processed.
 
             Example:
-                ```python
+
+            .. code-block:: python
+
                 while True:
                     try:
                         if dataset.next_window():
@@ -506,7 +532,6 @@ def make_odps_window_io(split_num=None, row_num=None):
                     except StopIteration:
                         print("All windows processed")
                         break
-                ```
 
             Note:
                 This method should be called before processing each window.
@@ -534,7 +559,9 @@ def make_odps_window_io(split_num=None, row_num=None):
             allowing the dataset to be reused from the beginning.
 
             Example:
-                ```python
+
+            .. code-block:: python
+
                 # Process data once
                 while True:
                     try:
@@ -548,7 +575,7 @@ def make_odps_window_io(split_num=None, row_num=None):
                 #
                 dataset.reset()
                 # Can now call next_window() again from the beginning
-                ```
+
             """
             self._window_paths = []
             self._read_offset = self._read_offset.fill_(0)
@@ -573,10 +600,11 @@ def _sample_sheets(table, task_id, thread_num, row_num, seed=0):
         List[TableSheet]: List of randomly sampled table sheets.
 
     Example:
-        ```python
+
+    .. code-block:: python
+
         # Sample 10000 rows across 4 threads
         sheets = _sample_sheets("project.table", 0, 4, 10000, seed=42)
-        ```
 
     Note:
         This function uses random sampling, so results will vary unless

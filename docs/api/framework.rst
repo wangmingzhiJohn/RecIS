@@ -17,7 +17,7 @@ Trainer
 ~~~~~~~
 
 .. autoclass:: Trainer
-   :members: __init__, add_hook, add_hooks, train, evaluate, restore
+   :members: __init__, add_hook, add_hooks, train, evaluate, train_and_evaluate
 
 Saver
 ~~~~~~~~~~~~~~~~~
@@ -25,41 +25,25 @@ Saver
 .. currentmodule:: recis.framework.checkpoint_manager
 
 .. autoclass:: Saver
-   :members: __init__, register_for_checkpointing, save, load, load_by_config
+   :members: __init__, register_io_state, register_for_checkpointing, save, restore, load, load_by_config
 
-CheckpointManager
+ModelBankParser
 ~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: recis.framework.checkpoint_manager
+TODO(lanling.ljw)
 
-.. autoclass:: CheckpointManager
-   :members: __init__, save, restore
+.. currentmodule:: recis.framework.model_bank
 
-**Example Usage:**
+.. autoclass:: ModelBankParser
+   :members: __init__, parse_all_model_bank, parse_dynamic_model_bank
 
-.. code-block:: python
+Exporter
+~~~~~~~~~~~~~~~~~
 
-   from recis.framework.checkpoint_manager import CheckpointManager, Saver
-   
-   # Create Saver
-   saver = Saver(
-         model,
-         sparse_optimizer,
-         output_dir=output_dir,
-         max_keep=2,
-         concurrency=2,
-      )
-   # Create checkpoint manager
-   checkpoint_manager = CheckpointManager(
-         saver,
-         save_interval=1000
-   )
-   
-   # Save checkpoint
-   checkpoint_manager.save()
-   
-   # Load latest checkpoint
-   checkpoint = checkpoint_manager.restore()
+.. currentmodule:: recis.framework.exporter
+
+.. autoclass:: Exporter
+   :members: __init__, export
 
 Advanced Usage
 --------------

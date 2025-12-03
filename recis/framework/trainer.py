@@ -56,7 +56,17 @@ class TrainingArguments:
         max_to_keep (int): Maximum number of checkpoints to keep. Defaults to 5.
         save_concurrency_per_rank (int): Number of concurrent save operations per rank.
                                         Defaults to 4.
-        save_every_n_windows (int): Number of io windows to save checkpoints. Defaults to 1.
+        save_every_n_windows (Optional[int]): Number of io windows to save checkpoints. Defaults to 1.
+        save_every_n_epochs (Optional[int]): Number of epochs to save checkpoints. Defaults to None.
+        save_end (bool): Whether to save checkpoints at the end of training. Defaults to True.
+        load_update_steps (Optional[int]): Number of steps to load dynamic model bank. Defaults to None.
+        load_update_windows (Optional[int]): Number of window to load dynamic model bank. Defaults to 1.
+        load_update_epochs (Optional[int]): Number of epochs to load dynamic model bank. Defaults to None.
+        params_not_save (Optional[list]): Names of parameters not to save. Defaults to None.
+        save_filter_fn ([Callable]): Function to filter checkpoint blocks. Defaults to None.
+        saver_option (Optional[SaverOptions]): Options for checkpoint saver. Defaults to None.
+        ckpt_save_arg (Optional[CheckpointSaveArguments]): Arguments for checkpoint save. Defaults to None.
+        ckpt_load_arg (Optional[CheckpointLoadArguments]): Arguments for checkpoint load. Defaults to None.
     """
 
     gradient_accumulation_steps: int = 1
