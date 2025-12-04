@@ -523,6 +523,7 @@ def build_fg(
     shape_manager_class=ShapeManager,
     uses_columns=None,
     lower_case=False,
+    with_seq_prefix=False,
     already_hashed=False,
     hash_in_io=False,
     devel_mode=False,
@@ -552,6 +553,8 @@ def build_fg(
             If None, uses all columns.
         lower_case (bool, optional): Whether to convert configuration keys
             to lowercase. Defaults to False.
+        with_seq_prefix (bool, optional): Whether the feature name already has sequence block name as prefix.
+            Defaults to False.
         already_hashed (bool, optional): Whether features are already hashed.
             Defaults to False.
         hash_in_io (bool, optional): Whether to perform hashing in I/O layer.
@@ -586,6 +589,7 @@ def build_fg(
         mc_config=mc_config,
         uses_columns=uses_columns,
         lower_case=lower_case,
+        with_seq_prefix=with_seq_prefix,
     )
     fg_parser = fg_parser_class(
         fg_conf_path,

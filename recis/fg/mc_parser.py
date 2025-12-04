@@ -28,7 +28,7 @@ class MCParser:
     """
 
     def __init__(
-        self, mc_config_path=None, mc_config=None, uses_columns=None, lower_case=False
+        self, mc_config_path=None, mc_config=None, uses_columns=None, lower_case=False, with_seq_prefix=False
     ):
         """Initialize the MC Parser.
 
@@ -41,6 +41,8 @@ class MCParser:
                 If None, uses all columns from the configuration.
             lower_case (bool, optional): Whether to convert configuration keys
                 to lowercase. Defaults to False.
+            with_seq_prefix (bool, optional): Whether the feature name already has sequence block name as prefix.
+                Defaults to False.
 
         Raises:
             AssertionError: If neither mc_config_path nor mc_config is provided.
@@ -53,6 +55,8 @@ class MCParser:
         self.blocks = OrderedDict()
         # mc blocks for concat
         self.fea_blocks = OrderedDict()
+
+        self.with_seq_prefix = with_seq_prefix
 
     def _init_mc(self, mc_config_path, mc_config, lower_case):
         """Initialize model configuration from file or dictionary.
@@ -140,7 +144,7 @@ class MCParser:
             # init feature blocks
             self.fea_blocks[block_name] = []
             prefix = ""
-            if block_name in self.seq_blocks:
+            if block_name in self.seq_blocks and not self.with_seq_prefix:
                 prefix = block_name + "_"
             for fn in features:
                 self.blocks[prefix + fn] = 1
