@@ -111,7 +111,7 @@ template <typename T, typename pack_t>
 __device__ void segment_atomic_add(T* dst_gm, T* val_ptr) {
   constexpr int vec_size = sizeof(pack_t) / sizeof(T);
   for (int idx = 0; idx < vec_size; ++idx) {
-    atomic_add_fast<T>(dst_gm + idx, val_ptr[idx]);  // atomicAdd
+    atomic_add_custom<T>(dst_gm + idx, val_ptr[idx]);  // atomicAdd
   }
 }
 
