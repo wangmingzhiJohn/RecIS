@@ -365,7 +365,7 @@ class ExportTorchFxTool:
             func_signature = ", ".join(args)
             dict_creation_lines = [f"        '{arg}': {arg}," for arg in args]
             func_body = (
-                "    inputs = {{\n" + "\n".join(dict_creation_lines) + "\n    }\n"
+                "    inputs = {\n" + "\n".join(dict_creation_lines) + "\n    }\n"
             )
             func_body += "    return self.user_model(inputs)\n"
             func_code = f"def forward(self, {func_signature}):\n{func_body}"
@@ -415,7 +415,7 @@ class ExportTorchFxTool:
                 # 构建函数体
                 dict_creation_lines = [f"        '{arg}': {arg}," for arg in valid_args]
                 func_body = (
-                    "    inputs = {{\n" + "\n".join(dict_creation_lines) + "\n    }\n"
+                    "    inputs = {\n" + "\n".join(dict_creation_lines) + "\n    }\n"
                 )
 
                 # 为invalid_placeholder添加空tensor
