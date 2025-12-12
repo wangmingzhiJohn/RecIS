@@ -29,7 +29,7 @@ for level in ("info", "warning", "error"):
 
 @dataclass
 class ModelBankEntry:
-    path: str
+    path: str = field(default="")
     load: Set[str] = field(default_factory=lambda: {"*"})
     exclude: Set[str] = field(default_factory=set)
 
@@ -57,7 +57,7 @@ class ModelBankEntry:
         if not isinstance(self.path, str):
             raise TypeError(f"'path' must be a string, got {type(self.path).__name__}")
         if not self.path.strip():
-            raise ValueError("'path' must not be empty")
+            logger.warning("'path' is empty, not load any model.")
 
         if isinstance(self.load, list):
             object.__setattr__(self, "load", set(self.load))
@@ -175,6 +175,10 @@ class MBC:
 
 
 def get_update_path(path) -> str:
+    if len(path) == 0:
+        logger.warning("get_update_path: path is empty")
+        return ""
+
     uri = ""
     if path.startswith("model."):
         uri = path
@@ -484,9 +488,11 @@ class ModelBankParser:
         sparse_model_names: set[str],
         sparse_tables: set[str],
         dense_model_names: set[str],
+        extra_fields,
     ):
         self._output_dir = output_dir
         self._model_bank_content = model_bank_content
+        self._extra_fields = extra_fields
         self._original_model_names = deepcopy(model_names)
         self._original_dense_model_names = deepcopy(dense_model_names)
         self._original_sparse_model_names = deepcopy(sparse_model_names)
@@ -532,20 +538,16 @@ class ModelBankParser:
         self._replace_io_fields()
 
     def _replace_io_fields(self):
-        from recis.framework.checkpoint_manager import ExtraFields
-
         for bank in self._model_bank:
-            if ExtraFields.io_state in bank.load:
-                bank.load.discard(ExtraFields.io_state)
-                bank.load.update(ExtraFields.get_io_fields())
-            if ExtraFields.io_state in bank.exclude:
-                bank.exclude.discard(ExtraFields.io_state)
-                bank.exclude.update(ExtraFields.get_io_fields())
+            if self._extra_fields.io_state in bank.load:
+                bank.load.discard(self._extra_fields.io_state)
+                bank.load.update(self._extra_fields.get_io_fields())
+            if self._extra_fields.io_state in bank.exclude:
+                bank.exclude.discard(self._extra_fields.io_state)
+                bank.exclude.update(self._extra_fields.get_io_fields())
 
     def _get_dst_names(self, path: str):
         """read index file, model file, extra file to get dst vars"""
-        from recis.framework.checkpoint_manager import ExtraFields
-
         sparse_names = set()
         dense_names = set()
         extra_names = set()
@@ -574,14 +576,14 @@ class ModelBankParser:
         ):
             data = load_pt_file(ckpt_path, "extra")
             extra_names.update(data.keys())
-            if ExtraFields.prev_optim in data:
-                extra_names.discard(ExtraFields.prev_optim)
-                extra_names.add(ExtraFields.recis_dense_optim)
+            if self._extra_fields.prev_optim in data:
+                extra_names.discard(self._extra_fields.prev_optim)
+                extra_names.add(self._extra_fields.recis_dense_optim)
         else:
             logger.warning(f"Extra model file not found in {ckpt_path}")
 
         if fs.exists(os.path.join(ckpt_path, "io_state_0.pt")):
-            extra_names.update(ExtraFields.get_io_fields())
+            extra_names.update(self._extra_fields.get_io_fields())
 
         return sparse_names, dense_names, extra_names
 
@@ -625,6 +627,19 @@ class ModelBankParser:
             data.update(get_match_by_pattern(name, self._model_names))
         return data
 
+    def _add_dense_optim_names(self, names: set[str]):
+        """
+        if add dense modules, add recis.dense.optim to names automatically
+        """
+
+        has_dense_module = False
+        for name in names:
+            if name in self._dense_model_names:
+                has_dense_module = True
+                break
+        if has_dense_module:
+            names.add(self._extra_fields.recis_dense_optim)
+
     def _travel_model_bank_reversely(self, model_bank: list[ModelBankEntry]):
         var_dict = {}
         for bank in reversed(model_bank):
@@ -640,6 +655,8 @@ class ModelBankParser:
 
             exclude_names_set = self._get_names_set(bank.exclude)
             load_names_set = self._get_names_set(bank.load)
+            self._add_dense_optim_names(load_names_set)
+
             need_load_names = load_names_set - exclude_names_set
             if len(need_load_names) == 0:
                 logger.warning(f"No need to load vars in {path}")

@@ -44,6 +44,22 @@ class Model(torch.nn.Module):
         )
 
 
+class DenseModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.densex = nn.Sequential(
+            nn.Linear(1024, 512),
+            nn.Linear(512, 1),
+        )
+        self.densey = nn.Sequential(
+            nn.Linear(1024, 512),
+            nn.Linear(512, 1),
+        )
+
+    def forward(self, x):
+        return self.densex(x) + self.densey(x)
+
+
 class TestModelBank(unittest.TestCase):
     def setUp(self):
         # 创建临时目录
@@ -104,9 +120,9 @@ class TestModelBank(unittest.TestCase):
             if name.startswith("dense"):
                 oname = ""
                 if "dense1" in name:
-                    oname = name.replace("dense1", "dense2")
-                else:
-                    oname = name.replace("dense2", "dense1")
+                    oname = name.replace("dense1", "densex")
+                elif "dense2" in name:
+                    oname = name.replace("dense2", "densey")
                 self.assertTrue(torch.allclose(state_dict[oname], param))
 
     def _check_dense_optim(self, path):
@@ -243,6 +259,22 @@ class TestModelBank(unittest.TestCase):
             if name.startswith("dense"):
                 self.assertTrue(torch.allclose(state_dict[name], param))
 
+    def _run_dense_oname_model(self, path):
+        if os.path.exists(os.path.join(path, "model.pt")):
+            os.remove(os.path.join(path, "model.pt"))
+
+        model = DenseModel().to("cuda")
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        for _ in range(10):
+            optimizer.zero_grad()
+            x = torch.randn(100, 1024).to("cuda")
+            y = model(x)
+            loss = torch.sum(y)
+            loss.backward()
+            optimizer.step()
+
+        torch.save(model.state_dict(), os.path.join(path, "model.pt"))
+
     def test_model_bank(self):
         # 使用 self.tmpdir 替代硬编码的路径
         ckpt_1 = os.path.join(self.tmpdir, "ckpt_1")
@@ -335,6 +367,7 @@ class TestModelBank(unittest.TestCase):
         self.saver._init_model_bank(split_bank)
         self.saver.restore()
         self._check_dense_model(ckpt_6)
+        self._check_dense_optim(ckpt_6)
         self._check_sparse_model(
             ckpt_4, slot_names=["table_2"], table_names=["table_2"]
         )
@@ -342,32 +375,8 @@ class TestModelBank(unittest.TestCase):
             ckpt_4, slot_names=["table_none"], table_names=["table_1"]
         )
         self._check_sparse_optim(ckpt_3)
-        self._check_dense_optim(ckpt_3)
 
-        # Test 6: oname test
-        oname_bank = [
-            {
-                "path": ckpt_10,
-                "load": ["table_1*", "table_2*", "dense*"],
-                "exclude": ["io_state"],
-                "oname": [
-                    {"table_1*": "table_2*"},
-                    {"table_2*": "table_1*"},
-                    {"dense1*": "dense2*"},
-                    {"dense2*": "dense1*"},
-                ],
-            }
-        ]
-        self.saver._init_model_bank(oname_bank)
-        self.saver.restore()
-        self._check_sparse_oname(
-            ckpt_10,
-            src_tables=["table_1", "table_2"],
-            dst_tables=["table_2", "table_1"],
-        )
-        self._check_dense_oname(ckpt_10)
-
-        # Test 7: is dynamic test
+        # Test 6: is dynamic test
         dynamic_bank = [
             {
                 "path": ckpt_10,
@@ -380,6 +389,31 @@ class TestModelBank(unittest.TestCase):
         self.saver._init_model_bank(dynamic_bank)
         self.saver.restore()
         self._check_sparse_model(ckpt_10)
+
+        # Test 7: oname test
+        self._run_dense_oname_model(ckpt_10)
+        oname_bank = [
+            {
+                "path": ckpt_10,
+                "load": ["table_1*", "table_2*", "dense*"],
+                "exclude": ["io_state"],
+                "oname": [
+                    {"table_1*": "table_2*"},
+                    {"table_2*": "table_1*"},
+                    {"dense1*": "densex*"},
+                    {"dense2*": "densey*"},
+                ],
+            }
+        ]
+        self.saver._init_model_bank(oname_bank)
+        self.saver.restore()
+        self._check_sparse_oname(
+            ckpt_10,
+            src_tables=["table_1", "table_2"],
+            dst_tables=["table_2", "table_1"],
+        )
+        self._check_dense_oname(ckpt_10)
+        self._check_dense_optim(ckpt_10)
 
 
 if __name__ == "__main__":

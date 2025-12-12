@@ -87,6 +87,10 @@ def filter_bank(model_bank_conf: dict, internal: dict):
             name = k
             assert name in load_info, f"name {name} not found in internal"
 
+    # if not load any sparse model, not load sparse_adamw_beta optimizer
+    if len(model_bank_conf) == 0:
+        load_info = {k: v for k, v in load_info.items() if len(v[k]) > 0}
+
     new_load_info = {}
     table_mapping = {}
     for key, conf in model_bank_conf.items():
@@ -252,6 +256,7 @@ class Saver:
             self._sparse_names,
             self._sparse_tables,
             self._dense_names,
+            ExtraFields,
         )
 
         self._has_bank = self._model_bank_parser.has_bank()
@@ -558,7 +563,7 @@ class Saver:
 
         self._save_dense_meta(fs, ckpt_path, dense_state_dict)
 
-    def load_sparse_params(self, ckpt_dir: str, model_bank_conf: dict):
+    def _load_sparse_model(self, ckpt_dir: str, model_bank_conf: dict):
         """Load sparse parameters from checkpoint.
 
         Args:
@@ -580,7 +585,9 @@ class Saver:
         )
         loader.load()
 
-    def load_dense_params(self, ckpt_dir: str, model_bank_conf: dict):
+    def _load_dense_model(
+        self, ckpt_dir: str, model_bank_conf: dict, strict: bool
+    ) -> set[str]:
         """Load dense model parameters from checkpoint.
 
         Args:
@@ -590,39 +597,48 @@ class Saver:
         state_dict_loaded = load_pt_file(ckpt_dir, "model")
         if len(state_dict_loaded) == 0:
             logger.warning(f"No dense model found in {ckpt_dir}")
-            return
+            return set()
 
-        logger.info("Load dense model")
         filter_dict = {}
-        for k, v in state_dict_loaded.items():
-            if k in model_bank_conf:
-                if MBC.ONAME in model_bank_conf[k]:
-                    oname = model_bank_conf[k][MBC.ONAME]
-                    if oname in state_dict_loaded:
-                        logger.info(f"debug info: {k} -> {oname}")
-                        filter_dict[k] = state_dict_loaded[oname]
-                    else:
-                        logger.warning(f"[oname] No dense model found dst, for {oname}")
+        for k in model_bank_conf.keys():
+            if MBC.ONAME in model_bank_conf[k]:
+                oname = model_bank_conf[k][MBC.ONAME]
+                if oname in state_dict_loaded:
+                    logger.info(f"debug info: {k} -> {oname}")
+                    filter_dict[k] = state_dict_loaded[oname]
                 else:
-                    filter_dict[k] = v
+                    logger.warning(f"[oname] No dense model found dst, for {oname}")
+            else:
+                filter_dict[k] = state_dict_loaded[k]
 
         if len(filter_dict) != 0:
-            missing, unexpected = self._model.load_state_dict(filter_dict, strict=False)
+            logger.info("Load dense model")
+            missing, unexpected = self._model.load_state_dict(
+                filter_dict, strict=strict
+            )
             if len(missing) > 0:
                 logger.warning(f"Missing keys in dense model: {missing}")
             if len(unexpected) > 0:
                 logger.warning(f"Unexpected keys in dense model: {unexpected}")
+            return {
+                i
+                for i, _ in self._model.named_parameters()
+                if i not in set(missing) and i not in set(unexpected)
+            }
         else:
             logger.info("No dense model to load")
+
+        return set()
 
     @property
     def model(self):
         return self._model
 
-    def load_extra_params(
+    def _load_extra_params(
         self,
         ckpt_dir: str,
         model_bank_conf: dict,
+        dense_optim_args: dict,
         shared_id: int = 0,
     ):
         """Load extra parameters and IO states from checkpoint.
@@ -677,8 +693,23 @@ class Saver:
 
             data = extra_data[key]
             if hasattr(value, "load_state_dict"):
-                logger.info(f"Load dense optimizer from {ckpt_dir}")
-                value.load_state_dict(data)
+                if not hasattr(value, "named_optimizer"):
+                    logger.warning(
+                        f"Load dense optimizer from {ckpt_dir} may cause error, please upgrade to PyTorch>=2.6.0 and use named optimizer"
+                    )
+                    value.load_state_dict(data)
+                else:
+                    logger.info(
+                        f"Load dense optimizer from {ckpt_dir} using named optimizer"
+                    )
+                    value.load_state_dict(data, **dense_optim_args)
+                    logger.info("dense optimizer param group info:")
+                    for pg in value.param_groups:
+                        logger.info(
+                            json.dumps(
+                                {k: v for k, v in pg.items() if k != "params"}, indent=4
+                            )
+                        )
             elif isinstance(value, torch.Tensor):
                 value.copy_(data)
             else:
@@ -721,6 +752,30 @@ class Saver:
             ckpt_path = os.path.join(ckpt_path, ckpt_id)
         self.load_by_config(ckpt_path, self._shard_id, model_bank_conf)
 
+    def _convert_valid_names(self, valid_names, model, optimizer):
+        """
+        convert valid model names to optimizer param names
+        """
+        model_dict = dict(model.named_parameters())
+        optim_dict = {}
+        for group in optimizer.param_groups:
+            if "param_names" not in group:
+                msg = ", ".join(
+                    [
+                        "No param_names found in optimizer param groups",
+                        "this may cause error when load dense optimizer",
+                        "please upgrade to PyTorch>=2.6.0 and use wrapped_named_optimizer.",
+                    ]
+                )
+                logger.warning(msg)
+                return valid_names
+            optim_dict.update(dict(zip(group["params"], group["param_names"])))
+
+        res = set()
+        for name in valid_names:
+            res.add(optim_dict[model_dict[name]])
+        return res
+
     def load_by_config(
         self,
         ckpt_path: str,
@@ -734,17 +789,36 @@ class Saver:
         sparse_model_bank = {
             k: v for k, v in model_bank_conf.items() if k in self._sparse_names
         }
-        self.load_sparse_params(ckpt_path, sparse_model_bank)
+        self._load_sparse_model(ckpt_path, sparse_model_bank)
 
+        strict = not next(iter(model_bank_conf.values())).get(MBC.IGNORE_ERROR, True)
         dense_model_bank = {
             k: v for k, v in model_bank_conf.items() if k in self._dense_names
         }
-        self.load_dense_params(ckpt_path, dense_model_bank)
+
+        valid_dense_names = self._convert_valid_names(
+            self._load_dense_model(ckpt_path, dense_model_bank, strict),
+            self._model,
+            self._extra_save_dict[ExtraFields.recis_dense_optim],
+        )
+
+        load_map = {
+            k: v[MBC.ONAME]
+            for k, v in model_bank_conf.items()
+            if MBC.ONAME in v and k in self._dense_names
+        }
+        dense_optim_args = {
+            "valid_names": valid_dense_names,
+            "load_map": load_map,
+            "strict": strict,
+        }
 
         extra_set = set(self._extra_save_dict.keys())
         extra_set.update(ExtraFields.get_io_fields())
         extra_model_bank = {k: v for k, v in model_bank_conf.items() if k in extra_set}
-        self.load_extra_params(ckpt_path, extra_model_bank, shared_id)
+        self._load_extra_params(
+            ckpt_path, extra_model_bank, dense_optim_args, shared_id
+        )
 
     def get_extra_data(self, name: str):
         if name in self._extra_save_dict:
