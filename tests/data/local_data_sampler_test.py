@@ -106,6 +106,29 @@ class LocalDataSamplerTest(unittest.TestCase):
         self.assertTrue(0 not in sample_ids[:sample_cnt])
         self.assertTrue(1 not in sample_ids[sample_cnt:])
 
+    def test_sample_ids_with_avoid_conflict_with_all_dedup_tags(self):
+        sampler = LocalDataSampler(
+            sample_tag="sample_tag",
+            dedup_tag="dedup_tag",
+            weight_tag="weight_tag",
+            skey_name="skey_name",
+            put_back=False,
+        )
+        batch, batch_size = self.mock_batch()
+        sampler.load_by_batch(batch)
+        sample_tag_tensors = self.mock_sample_tag_tensors()
+        dedup_tag_tensors = self.mock_dedup_tag_tensors()
+        sample_cnt = 2
+        sample_ids = sampler.sample_ids(
+            sample_tag_tensors,
+            dedup_tag_tensors,
+            sample_cnt,
+            avoid_conflict_with_all_dedup_tags=True,
+        )
+        print(sample_ids)
+        self.assertTrue(0 not in sample_ids)
+        self.assertTrue(1 not in sample_ids)
+
     def test_valid_sample_ids(self):
         sampler = LocalDataSampler(
             sample_tag="sample_tag",

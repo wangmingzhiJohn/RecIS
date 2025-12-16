@@ -220,7 +220,8 @@ void LocalDataResource::InitSampler() {
 std::tuple<Tensor, Tensor, Tensor> LocalDataResource::SampleIds(
     std::vector<Tensor> sample_tag_tensors,
     std::vector<Tensor> dedup_tag_tensors, Tensor sample_cnts,
-    bool avoid_conflict, int64_t pos_num) const {
+    bool avoid_conflict, int64_t pos_num,
+    bool avoid_conflict_with_all_dedup_tags) const {
   CounterReadLock;
   TORCH_CHECK(sampler_initialized_, "please init sampler!");
   // auto output = output_t->vec<int64>();
@@ -244,12 +245,26 @@ std::tuple<Tensor, Tensor, Tensor> LocalDataResource::SampleIds(
       multi_cnts = false;
       total_sample_cnt = sample_cnts_vec[0] * pos_num;
     }
+    std::set<size_t> dedup_id_set;
+    if (avoid_conflict_with_all_dedup_tags) {
+      AT_DISPATCH_ALL_TYPES(
+          dedup_tag_tensors[0].scalar_type(), "SampleIds", [&]() {
+            auto begin = dedup_tag_tensors[0].data_ptr<scalar_t>();
+            auto end = begin + dedup_tag_tensors[0].numel();
+            for (auto it = begin; it < end; it++) {
+              dedup_id_set.insert(*it);
+            }
+          });
+    }
     for (int i = 0; i < pos_num; i++) {
-      // check dedup_ids
-      std::vector<size_t> dedup_ids = dedup_tag_indexer.Find(i);
-      TORCH_CHECK(dedup_ids.size() >= 1,
-                  "dedup_tag_tensors of positive samples can't be empty");
-      std::set<size_t> dedup_id_set(dedup_ids.begin(), dedup_ids.end());
+      if (!avoid_conflict_with_all_dedup_tags && avoid_conflict) {
+        // check dedup_ids
+        std::vector<size_t> dedup_ids = dedup_tag_indexer.Find(i);
+        TORCH_CHECK(dedup_ids.size() >= 1,
+                    "dedup_tag_tensors of positive samples can't be empty");
+        dedup_id_set.clear();
+        dedup_id_set.insert(dedup_ids.begin(), dedup_ids.end());
+      }
       std::vector<size_t> cates = sample_tag_indexer.Find(i);
       if (put_back_) {
         PutBackSample(cates, dedup_id_set,

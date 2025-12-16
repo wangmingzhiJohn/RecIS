@@ -42,9 +42,15 @@ class LocalDataResource:
         sample_cnts: torch.Tensor,
         avoid_conflict: bool,
         pos_num: int,
+        avoid_conflict_with_all_dedup_tags: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return self._impl.sample_ids(
-            sample_tag_tensors, dedup_tag_tensors, sample_cnts, avoid_conflict, pos_num
+            sample_tag_tensors,
+            dedup_tag_tensors,
+            sample_cnts,
+            avoid_conflict,
+            pos_num,
+            avoid_conflict_with_all_dedup_tags,
         )
 
     def valid_sample_ids(

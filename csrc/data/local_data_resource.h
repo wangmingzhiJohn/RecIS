@@ -134,7 +134,8 @@ class LocalDataResource : public torch::CustomClassHolder {
   std::tuple<Tensor, Tensor, Tensor> SampleIds(
       std::vector<Tensor> sample_tag_tensors,
       std::vector<Tensor> dedup_tag_tensors, Tensor sample_cnts,
-      bool avoid_conflict, int64_t pos_num) const;
+      bool avoid_conflict, int64_t pos_num,
+      bool avoid_conflict_with_all_dedup_tags) const;
   void SampleIdsWithSampleCounts(std::vector<Tensor> &sample_tag_tensors,
                                  std::vector<Tensor> &dedup_tag_tensors,
                                  int64_t sample_cnt, const Tensor *sample_cnts,

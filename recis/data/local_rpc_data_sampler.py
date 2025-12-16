@@ -270,6 +270,7 @@ class LocalRpcDataSampler:
         sample_cnts: torch.Tensor | int,
         sample_tag_ragged_tensor: RaggedTensor = None,
         avoid_conflict: bool = True,
+        avoid_conflict_with_all_dedup_tags: bool = False,
     ) -> torch.Tensor:
         """Sample negative item IDs.
 
@@ -280,6 +281,7 @@ class LocalRpcDataSampler:
                 you can set it all to 0.
                 E.g. sample_tag_ragged_tensor = RaggedTensor(values=torch.zeros_like(dedup_tag_ragged_tensor.values()), offsets=dedup_tag_ragged_tensor.offsets())
             avoid_conflict: Whether the sampled negative items IDs should avoid duplication with positive items IDs.
+            avoid_conflict_with_all_dedup_tags: If true, the sampled negative IDs will be different from all dedup tags.
 
         Returns:
             Negative item IDs.
@@ -291,6 +293,7 @@ class LocalRpcDataSampler:
             sample_cnts=sample_cnts,
             sample_tag_ragged_tensor=sample_tag_ragged_tensor,
             avoid_conflict=avoid_conflict,
+            avoid_conflict_with_all_dedup_tags=avoid_conflict_with_all_dedup_tags,
         )
 
     def combine_vector_with_sample_counts(

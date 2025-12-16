@@ -213,6 +213,7 @@ class LocalDataSampler:
         dedup_tag_ragged_tensor,
         sample_cnts,
         avoid_conflict=True,
+        avoid_conflict_with_all_dedup_tags=False,
     ):
         sample_tag_tensors = [
             sample_tag_ragged_tensor.values()
@@ -230,7 +231,12 @@ class LocalDataSampler:
             )
 
         result = self._local_data_resource.sample_ids(
-            sample_tag_tensors, dedup_tag_tensors, sample_cnts, avoid_conflict, pos_num
+            sample_tag_tensors,
+            dedup_tag_tensors,
+            sample_cnts,
+            avoid_conflict,
+            pos_num,
+            avoid_conflict_with_all_dedup_tags,
         )
         return result[0]
 

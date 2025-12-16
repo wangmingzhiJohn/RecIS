@@ -144,6 +144,7 @@ class _SamplerWrapper:
         dedup_tag_ragged_tensor,
         sample_cnts,
         avoid_conflict=True,
+        avoid_conflict_with_all_dedup_tags=False,
     ):
         with self._rw_lock.read_lock():
             return self._sampler.sample_ids(
@@ -151,6 +152,7 @@ class _SamplerWrapper:
                 dedup_tag_ragged_tensor,
                 sample_cnts,
                 avoid_conflict,
+                avoid_conflict_with_all_dedup_tags,
             )
 
     def pack_feature(
