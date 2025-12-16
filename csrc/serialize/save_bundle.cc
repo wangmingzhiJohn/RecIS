@@ -261,6 +261,9 @@ int SaveBundle::GenJsonInfo(const std::string &json_file,
     uint64_t file_size = 0;
     RECIS_STATUS_COND(Env::Default()->GetFileSize(json_file, &file_size));
 
+    if (file_size == 0) {
+      LOG(ERROR) << "Sub Json File size error: " << file_size;
+    }
     torch::string_view result;
     std::string content;
     content.resize(file_size);
@@ -270,8 +273,8 @@ int SaveBundle::GenJsonInfo(const std::string &json_file,
       RECIS_STATUS_COND(file->Read(0, file_size, &result, &content[0]));
     }
 
-    RECIS_STATUS_COND(Env::Default()->DeleteFile(json_file));
     auto dict = nlohmann::json::parse(content);
+    RECIS_STATUS_COND(Env::Default()->DeleteFile(json_file));
     combine_data.merge_patch(dict);
   } else {
     LOG(ERROR) << "Not Found Sub Json File" << json_file;
@@ -292,7 +295,8 @@ void SaveBundle::GetSubFileData(const std::vector<std::string> &json_files,
       }
     }
     if (record_files.size() != json_files.size()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100000));
+      LOG(ERROR) << "Not all worker save done, wait 20s ...";
+      std::this_thread::sleep_for(std::chrono::milliseconds(20000));
     }
   }
 }

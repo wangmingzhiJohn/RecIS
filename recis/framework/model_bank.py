@@ -11,7 +11,7 @@ from safetensors.torch import load_file
 from recis.framework.filesystem import get_file_system
 from recis.serialize.checkpoint_reader import CheckpointReader
 from recis.utils.logger import Logger
-from recis.utils.mos import Mos, get_model_version
+from recis.utils.mos import Mos
 
 
 logger = Logger(__name__)
@@ -174,59 +174,41 @@ class MBC:
     IGNORE_ERROR = "ignore_error"
 
 
-def get_update_path(path) -> str:
+def maybe_get_latest_version(path, force_sub_version=False):
+    ckpt_id = None
+    fs = get_file_system(path)
+    if fs.isdir(path):
+        if fs.exists(os.path.join(path, "checkpoint")):
+            content = fs.open(os.path.join(path, "checkpoint"), "r").read()
+            versions = content.split("\n")[::-1]
+            for version in versions:
+                if len(version) == 0:
+                    continue
+                ckpt_id = version.strip()
+                break
+        logger.info(f"Get latest checkpoint version {ckpt_id} from path {path}.")
+    else:
+        logger.warning(f"Checkpoint not found in path: {path}")
+    if ckpt_id is not None:
+        real_path = os.path.join(path, ckpt_id)
+    else:
+        real_path = path
+        if force_sub_version:
+            real_path = ""
+    logger.info(f"Get real ckpt path {real_path} from {path}")
+    return real_path
+
+
+def get_update_path(path, is_bank=True) -> str:
     if len(path) == 0:
         logger.warning("get_update_path: path is empty")
         return ""
 
-    uri = ""
     if path.startswith("model."):
-        uri = path
-        mos = Mos(uri)
-        if mos.uri_info["ckpt_id"] is not None:
-            return os.path.join(mos.real_physical_path, mos.uri_info["ckpt_id"])
-        version = get_model_version(
-            mos_version_uri=uri, user_id=os.environ.get("USER_ID", None)
-        )
-        ckpt_list = []
-        if version.exists():
-            version.query()
-            ckpt_list = version.get_ckpt_list()
-        if len(ckpt_list) == 0:
-            logger.warning(f"No ckpt found in mos version {uri}")
-            return ""
-
-        return ckpt_list[0]["real_physical_path"]
-    else:
-        fs = get_file_system(path)
-        if fs.isdir(path):
-            # if index file in dir, return path
-            # else, return latest ckpt dir
-            if fs.exists(os.path.join(path, "index")) and not fs.exists(
-                os.path.join(path, "checkpoint")
-            ):
-                return path
-
-            ckpt_dirs = []
-            if fs.exists(os.path.join(path, "checkpoint")):
-                with fs.open(os.path.join(path, "checkpoint"), "r") as f:
-                    for line in f:
-                        if line.strip():
-                            ckpt_dirs.append(line.strip())
-            else:
-                logger.warning(f"Checkpoint file not found in {path}")
-                return ""
-
-            if ckpt_dirs:
-                latest_dir = ckpt_dirs[-1]
-                logger.info(f"latest_dir: {latest_dir}")
-                return os.path.join(path, latest_dir)
-            else:
-                logger.info(f"No ckpt found in {path}")
-                return ""
-        else:
-            logger.warning(f"Invalid path: {path}")
-    return ""
+        mos = Mos(path, is_bank)
+        path = mos.real_physical_path
+    path = maybe_get_latest_version(path, (not is_bank))
+    return path
 
 
 def show_model_bank_format(name: str, model_bank):
@@ -772,7 +754,7 @@ class ModelBankParser:
             bank.oname = onames
 
     def _complete_model_bank(self):
-        path = get_update_path(self._output_dir)
+        path = get_update_path(self._output_dir, False)
         if path != "":
             self._model_bank_content.append(
                 {

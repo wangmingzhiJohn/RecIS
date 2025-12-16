@@ -7,13 +7,14 @@ from recis.utils.logger import Logger
 
 
 if not os.environ.get("BUILD_DOCUMENT", None) == "1":
-    from nebula.mos import ModelCkpt, ModelVersion
+    from openlm_hub.openlm_api import (
+        add_or_sync_mos_ckpt,
+        delete_ckpt,
+        get_mos_ckpt_info,
+        get_or_create_mos_version,
+    )
 
 logger = Logger(__name__)
-
-
-def get_model_version(mos_version_uri, user_id):
-    return ModelVersion(mos_version_uri=mos_version_uri, user_id=user_id)
 
 
 def parse_uri(uri, auto_version=False):
@@ -73,12 +74,8 @@ def parse_uri(uri, auto_version=False):
         version = uri_partition[1].replace("version=", "")
         level = "version"
     if len(uri_partition) > 2:
-        version = uri_partition[1].replace("version=", "")
-        if version.find("max_pt") > 0:
-            level = "version"
-        else:
-            ckpt_id = uri_partition[2].replace("ckpt_id=", "")
-            level = "ckpt_id"
+        ckpt_id = uri_partition[2].replace("ckpt_id=", "")
+        level = "ckpt_id"
     # version will be automatically generated when auto_version is True
     if level == "model" and auto_version:
         version = time.strftime("%Y%m%d%H%M%S", time.localtime())
@@ -124,41 +121,16 @@ def render_uri_to_model_bank_path(uri, user_id):
         >>> print(path)  # '/path/to/model/storage/v1.0/step_1000'
     """
     uri_info = parse_uri(uri, auto_version=False)
+    uri = uri_info["uri"]
     full_uri = None
     physical_path = None
     if uri_info["level"] == "model":
         raise ValueError("[XDL_MOS] mos model_bank path not support only model")
     if uri_info["level"] == "version":
-        version = ModelVersion(mos_version_uri=uri, user_id=user_id)
-        if version.exists():
-            version.query()
-            if uri_info["version"] == "$max_pt":
-                ckpt_list = version.get_latest_ckpt()
-            else:
-                ckpt_list = version.get_ckpt_list()
-            logger.warning(
-                f"[XDL_MOS] render_uri_to_model_bank_path uri={uri}, ckpt_list={ckpt_list}"
-            )
-            if len(ckpt_list) == 0:
-                raise ValueError(f"[XDL_MOS] no ckpt found in version {uri}")
-            last_ckpt = ckpt_list[0]
-            full_uri = last_ckpt["uri"]
-            if uri.find("ckpt_id") > 0:
-                physical_path = os.path.join(
-                    last_ckpt["real_physical_path"], last_ckpt["ckpt_id"]
-                )
-            else:
-                physical_path = version.physical_path
-        else:
-            raise ValueError(f"[XDL_MOS] version not exist for {uri}")
-    else:
-        ckpt = ModelCkpt(uri=uri, user_id=user_id)
-        if ckpt.exists():
-            ckpt.query()
-            physical_path = ckpt.physical_path
-            full_uri = ckpt.uri
-        else:
-            raise ValueError(f"[XDL_MOS] ckpt not exists for {uri}")
+        uri = os.path.join(uri, "ckpt_id=$max_pt")
+    ckpt = get_mos_ckpt_info(user_id=user_id, mos_ckpt_uri=uri)
+    physical_path = ckpt.physical_path
+    full_uri = ckpt.uri
     return physical_path, full_uri
 
 
@@ -200,19 +172,9 @@ def render_uri_to_output_dir(uri):
     if uri_info["level"] == "ckpt_id":
         # output dir should be a directory, so configuring ckpt id is not allowed
         raise ValueError("[MOS] nebula_mos not support ckpt_id")
-    mos_obj = ModelVersion(mos_version_uri=uri_info["uri"], user_id=user_id)
-    cluster = os.getenv("CALCULATE_CLUSTER", default=None)
-    logger.info(f"[MOS] cluster = {cluster}")
-    for index in range(3):
-        try:
-            mos_obj.create_or_update(cluster=cluster)
-            break
-        except Exception as e:
-            if index < 2:
-                time.sleep(5)
-            else:
-                raise e
-    real_physical_path = mos_obj.physical_path
+
+    version_info = get_or_create_mos_version(user_id, uri_info["uri"])
+    real_physical_path = version_info.physical_path
     if len(real_physical_path) == 0:
         raise ValueError(f"[MOS] can not get output_dir by uri : {uri}")
     return real_physical_path
@@ -333,30 +295,23 @@ class Mos:
             - Logs checkpoint deletion operations as warnings
             - Uses the version_uri for checkpoint operations
         """
-        ckpt = ModelCkpt(
-            mos_version_uri=self.version_uri,
-            ckpt_id=ckpt_id,
-            user_id=self.user_id,
-            path=path,
-        )
-        if is_delete:
-            ckpt.delete()
-            logger.warning(f"[MOS] delete ckpt_id = {ckpt_id}")
-        else:
-            for index in range(3):
-                try:
-                    ckpt.create_or_update()
-                    break
-                except Exception as e:
-                    if index < 2:
-                        time.sleep(5)
-                    else:
-                        raise e
-
+        ckpt_labels = []
         if label_key is not None and label_value is not None:
             assert isinstance(label_key, str) and isinstance(label_value, str)
             assert not is_delete, "[MOS] label can not be set when ckpt is deleted"
             logger.info(
                 f"[MOS] set label '{label_key}={label_value}' for ckpt_id={ckpt_id}"
             )
-            ckpt.add_label(label_key=label_key, label_value=label_value)
+            ckpt_labels.append(f"{label_key}={label_value}")
+
+        ckpt_uri = f"{self.version_uri}/ckpt_id={ckpt_id}"
+        if is_delete:
+            delete_ckpt(mos_ckpt_uri=ckpt_uri, user_id=self.user_id)
+            logger.warning(f"[MOS] delete ckpt_id = {ckpt_id}")
+        else:
+            add_or_sync_mos_ckpt(
+                user_id=self.user_id,
+                mos_ckpt_uri=ckpt_uri,
+                physical_path=path,
+                ckpt_labels=ckpt_labels,
+            )
