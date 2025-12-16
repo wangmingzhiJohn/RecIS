@@ -28,7 +28,12 @@ class MCParser:
     """
 
     def __init__(
-        self, mc_config_path=None, mc_config=None, uses_columns=None, lower_case=False, with_seq_prefix=False
+        self,
+        mc_config_path=None,
+        mc_config=None,
+        uses_columns=None,
+        lower_case=False,
+        with_seq_prefix=False,
     ):
         """Initialize the MC Parser.
 

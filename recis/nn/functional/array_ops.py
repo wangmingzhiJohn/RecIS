@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 
@@ -166,3 +167,10 @@ def multi_hash(input, muls, primes, bucket_num):
     outs = torch.ops.recis.multi_hash(input, muls, primes, bucket_num)
     outs = [out.reshape(ori_shape) for out in outs]
     return outs
+
+
+def parse_sample_id(data, is_max=True):
+    x = data
+    if isinstance(data, np.ndarray):
+        x = data.reshape(-1).tolist()
+    return torch.ops.recis.parse_sample_id(x, is_max)

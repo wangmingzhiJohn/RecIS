@@ -32,6 +32,7 @@
 #include "ops/ids_encode.h"
 #include "ops/ids_partition.h"
 #include "ops/multi_hash.h"
+#include "ops/parse_sample_id.h"
 #include "ops/ragged_tile.h"
 #include "ops/ragged_to_dense.h"
 #include "ops/ragged_to_sparse.h"
@@ -248,4 +249,5 @@ TORCH_LIBRARY(recis, m) {
       }))
       .def("get_client", &recis::monitor::Factory::get_client_py);
   m.def("make_MonitorFactory", &recis::monitor::Factory::MakeInstancePy);
+  m.def("parse_sample_id", recis::functional::parse_sample_id);
 }
