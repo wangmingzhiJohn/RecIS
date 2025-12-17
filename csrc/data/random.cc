@@ -1,5 +1,7 @@
 #include "data/random.h"
 
+#include <ctime>
+
 namespace recis {
 namespace data {
 

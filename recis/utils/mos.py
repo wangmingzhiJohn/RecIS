@@ -17,6 +17,13 @@ if not os.environ.get("BUILD_DOCUMENT", None) == "1":
 logger = Logger(__name__)
 
 
+def format_physical_path(path):
+    if path.startswith("xpfs://"):
+        # "xpfs://xxx/data/.../" -> "/data/.../"
+        path = "/" + path[7:].split("/", 1)[1]
+    return path
+
+
 def parse_uri(uri, auto_version=False):
     """Parse and validate MOS URI format.
 
@@ -256,6 +263,7 @@ class Mos:
             )
         else:
             self.real_physical_path = render_uri_to_output_dir(uri)
+        self.real_physical_path = format_physical_path(self.real_physical_path)
 
     def ckpt_update(
         self,
