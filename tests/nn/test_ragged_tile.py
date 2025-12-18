@@ -120,6 +120,42 @@ def tile_cpu(
     return np.array(out)
 
 
+def tile_row_torch(offset, seq, table):
+    dim = table.shape[1]
+    padding_vec = torch.zeros(1, dim, dtype=table.dtype, device=table.device)
+    table_with_padding = torch.cat([table, padding_vec], dim=0)
+    padding_idx = table.shape[0]
+
+    starts = offset[:-1]
+    lengths = offset[1:] - starts
+
+    arange_seq = torch.arange(seq, device=table.device).unsqueeze(0)
+    indices_grid = starts.unsqueeze(1) + arange_seq
+    mask = arange_seq < lengths.unsqueeze(1)
+
+    final_indices = torch.where(mask, indices_grid, padding_idx)
+    output = table_with_padding[final_indices]
+    output = output.view(-1, dim)
+
+    return output
+
+
+def tile_fwd_torch(
+    value: torch.Tensor,
+    offsets: List[torch.Tensor],
+    seqs: List[int],
+    table: torch.Tensor,
+):
+    out = []
+    table_src = table[value]
+    for idx in range(len(seqs)):
+        offset = offsets[idx]
+        max_seq = seqs[idx]
+        rt = tile_row_torch(offset, max_seq, table_src)
+        out.append(rt)
+    return torch.cat(out, dim=0)
+
+
 def tile_backward_cpu(
     value: List[int],
     offset: List[int],
@@ -133,6 +169,47 @@ def tile_backward_cpu(
         shape = (len(cur_off) - 1, seq[idx], dx_shape[1])
         cur_dy = dy[idx].reshape(shape)
         tile_back_row_cpu(cur_off, seq[idx], value, cur_dy, dx)
+    return dx
+
+
+def tile_back_row_torch(
+    offset: torch.Tensor,
+    seq: int,
+    indices: torch.Tensor,
+    dy: torch.Tensor,
+    dx_shape: tuple,
+):
+    batch_size, max_len, _ = dy.shape
+    device = dy.device
+    d_table = torch.zeros(dx_shape, dtype=dy.dtype, device=dy.device)
+    off_lens = offset[1:] - offset[:-1]
+    effect_len = torch.min(off_lens, torch.tensor(seq, device=device))
+    arange_t = torch.arange(max_len, device=device)
+    mask = arange_t < effect_len.unsqueeze(1)
+
+    src_dy = dy[mask]
+    id_tensor = torch.arange(max_len, device=device).unsqueeze(0)
+    flat_indices_map = offset[:-1].unsqueeze(1) + id_tensor
+    valid_id_loc = flat_indices_map[mask]
+    indices_new = indices[valid_id_loc]
+    d_table.index_add_(0, indices_new, src_dy)
+    return d_table
+
+
+def tile_backward_torch(
+    value: torch.Tensor,
+    offset: torch.Tensor,
+    seq: List[int],
+    dy: List[torch.Tensor],
+    dx_shape: tuple,
+) -> np.ndarray:
+    dx = torch.zeros(dx_shape, dtype=dy[0].dtype, device=dy[0].device)
+    for idx in range(len(offset)):
+        cur_off = offset[idx]
+        shape = (len(cur_off) - 1, seq[idx], dx_shape[1])
+        cur_dy = dy[idx].reshape(shape)
+        cur_dx = tile_back_row_torch(cur_off, seq[idx], value, cur_dy, dx_shape)
+        dx += cur_dx
     return dx
 
 
@@ -160,15 +237,17 @@ def tile_para():
     return out
 
 
-def tile_para_random():
-    batch_min = 100
-    batch_max = 120
-    tensor_num = 30
-    seq_min = 16
-    seq_max = 1024
-    value_len = 1024 * 4
-    value_max = 512
-    dim = 32
+def tile_para_random(
+    batch: tuple = (10, 20),
+    seq: tuple = (16, 32),
+    tensor_num: int = 10,
+    value_len: int = 128,
+    value_max: int = 100,
+    dim: int = 32,
+):
+    batch_min, batch_max = batch[0], batch[1]
+    seq_min, seq_max = seq[0], seq[1]
+
     batch = np.random.randint(
         batch_min, batch_max, size=tensor_num, dtype=np.int32
     ).tolist()
@@ -193,34 +272,37 @@ def tile_para_random():
     return out
 
 
-def tile_input(random=False):
-    if random:
-        return tile_para_random()
-    else:
-        return tile_para()
-
-
 def para_impro(para):
     para_cpu = para.copy()
     para_gpu = para.copy()
+    para_torch = para.copy()
+    # cpu
     para_cpu["offset"] = splite_off(para_cpu["batch"], para_cpu["offset"])
     para_cpu["dy"] = splite_dy(para_cpu["batch"], para_cpu["seq"], para_cpu["dy"])
+    # torch
+    para_torch["offset"] = [torch.tensor(x) for x in para_cpu["offset"].copy()]
+    para_torch["dy"] = [torch.tensor(x) for x in para_cpu["dy"].copy()]
+    para_torch["value"] = torch.tensor(para_torch["value"])
+    para_torch["table"] = torch.tensor(para_torch["table"])
+    # gpu
     device = "cuda"
     para_gpu["offset"] = torch.tensor(para_gpu["offset"], device=device)
     para_gpu["value"] = torch.tensor(para_gpu["value"], device=device)
     para_gpu["table"] = torch.tensor(para_gpu["table"], device=device)
     para_gpu["dy"] = torch.tensor(para_gpu["dy"], device=device)
-    return (para_cpu, para_gpu)
+    return (para_cpu, para_gpu, para_torch)
 
 
 class TestRaggedTileOp(unittest.TestCase):
-    def setUp(self):
-        para = tile_input(random=True)
-        self.para = para_impro(para)
-
-    def test_forward(self):
+    def _test_fwd(self, para):
         tile_func = tile_cpu
-        para_cpu, para_gpu = self.para
+        para_cpu, para_gpu, para_torch = para
+        x_torch = tile_fwd_torch(
+            para_torch["value"],
+            para_torch["offset"],
+            para_torch["seq"],
+            para_torch["table"],
+        )
         x_cpu = tile_func(
             para_cpu["value"], para_cpu["offset"], para_cpu["seq"], para_cpu["table"]
         )
@@ -231,10 +313,11 @@ class TestRaggedTileOp(unittest.TestCase):
             para_gpu["offset"],
             para_gpu["table"],
         )
-        torch.allclose(torch.tensor(x_cpu), x_gpu.cpu(), atol=1e-5)
+        self.assertTrue(torch.allclose(torch.tensor(x_cpu), x_gpu.cpu(), atol=1e-6))
+        self.assertTrue(torch.allclose(x_torch.cpu(), x_gpu.cpu(), atol=1e-6))
 
-    def test_backward(self):
-        para_cpu, para_gpu = self.para
+    def _test_bwd(self, para):
+        para_cpu, para_gpu, para_torch = para
         para_gpu["table"].requires_grad_(True)
         dx_cpu = tile_backward_cpu(
             para_cpu["value"],
@@ -242,6 +325,13 @@ class TestRaggedTileOp(unittest.TestCase):
             para_cpu["seq"],
             para_cpu["dy"],
             para_cpu["table"].shape,
+        )
+        dx_torch = tile_backward_torch(
+            para_torch["value"],
+            para_torch["offset"],
+            para_torch["seq"],
+            para_torch["dy"],
+            para_torch["table"].shape,
         )
         y_gpu = ragged.ragged_tile(
             para_gpu["batch"],
@@ -252,8 +342,57 @@ class TestRaggedTileOp(unittest.TestCase):
         )
         y_gpu.backward(para_gpu["dy"])
         dx_gpu = para_gpu["table"].grad
-        torch.allclose(torch.tensor(dx_cpu), dx_gpu.cpu(), atol=1e-5)
+        self.assertTrue(torch.allclose(torch.tensor(dx_cpu), dx_gpu.cpu(), atol=1e-6))
+        self.assertTrue(torch.allclose(dx_torch.cpu(), dx_gpu.cpu(), atol=1e-6))
+
+    def test_fwd_and_bwd(self):
+        configurations = [
+            {
+                "batch": (10, 20),
+                "seq": (8, 24),
+                "tensor_num": 10,
+                "value_len": 32,
+                "value_max": 60,
+                "dim": 32,
+            },
+            {
+                "batch": (30, 41),
+                "seq": (11, 19),
+                "tensor_num": 7,
+                "value_len": 71,
+                "value_max": 83,
+                "dim": 7,
+            },
+            {
+                "batch": (1, 7),
+                "seq": (10, 13),
+                "tensor_num": 8,
+                "value_len": 50,
+                "value_max": 81,
+                "dim": 29,
+            },
+        ]
+        for params in configurations:
+            with self.subTest(msg="Testing with params", **params):
+                para = tile_para_random(
+                    params["batch"],
+                    params["seq"],
+                    params["tensor_num"],
+                    params["value_len"],
+                    params["value_max"],
+                    params["dim"],
+                )
+                para = para_impro(para)
+                self._test_fwd(para)
+                self._test_bwd(para)
+
+    # sample data for debug
+    def test_simple_data(self):
+        para = tile_para()
+        para = para_impro(para)
+        self._test_fwd(para)
+        self._test_bwd(para)
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()
