@@ -40,9 +40,13 @@ def dense_to_ragged(
         ...         [6, 0, 0],  # Sequence of length 1
         ...     ]
         ... )
-        >>> values, offsets = dense_to_ragged(dense)
+        >>> values, offsets = dense_to_ragged(dense, check_invalid=True)
         >>> print(values)  # tensor([1, 2, 3, 4, 5, 6])
         >>> print(offsets)  # [tensor([0, 2, 5, 6])]
+        >>> # check_invalid=False
+        >>> values, offsets = dense_to_ragged(dense)
+        >>> print(values)  # tensor([1, 2, 0, 3, 4, 5, 6, 0, 0])
+        >>> print(offsets)  # tensor([0, 3, 6, 9])
 
     Note:
         - Trailing zeros in each sequence are treated as padding and removed
