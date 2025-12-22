@@ -65,21 +65,10 @@ Hashtable::Hashtable(int64_t block_size,
                      torch::Dtype dtype, torch::Device device, bool coalesce,
                      const std::vector<std::string> &children,
                      at::intrusive_ptr<recis::embedding::Generator> generator,
-                     int64_t slice_begin, int64_t slice_end,
-                     int64_t slice_size) {
-  slot_group_ =
-      torch::make_intrusive<recis::embedding::SlotGroup>(block_size, device);
-  std::vector<int64_t> partial_shape = embedding_shape;
-  partial_shape.insert(partial_shape.begin(), block_size);
-  slot_group_->AppendEmbSlot(dtype, partial_shape, generator);
-  children_info_ =
-      torch::make_intrusive<recis::embedding::ChildrenInfo>(coalesce);
-  for (auto index : c10::irange(children.size())) {
-    children_info_->AddChild(children[index]);
-  }
-  slice_info_ = at::make_intrusive<recis::embedding::SliceInfo>(
-      slice_begin, slice_end, slice_size);
-  id_map_ = recis::embedding::MakeIdMap(device);
+                     int64_t slice_begin, int64_t slice_end, int64_t slice_size)
+    : config_(block_size, embedding_shape, dtype, device, coalesce, children,
+              generator, slice_begin, slice_end, slice_size) {
+  ResetInternalState();
 }
 
 c10::intrusive_ptr<Hashtable> Hashtable::Make(
@@ -91,8 +80,36 @@ c10::intrusive_ptr<Hashtable> Hashtable::Make(
   auto ret = c10::make_intrusive<Hashtable>(
       block_size, embedding_shape, dtype, device, coalesce, children, generator,
       slice_begin, slice_end, slice_size);
-  ret->ChildrenInfo()->Validate();
   return ret;
+}
+
+void Hashtable::ResetInternalState() {
+  TORCH_CHECK(config_.block_size > 0,
+              "Block size must be positive during reset.");
+  TORCH_CHECK(config_.embedding_shape.size() > 0,
+              "Embedding shape cannot be empty.");
+
+  slot_group_ = torch::make_intrusive<recis::embedding::SlotGroup>(
+      config_.block_size, config_.device);
+
+  std::vector<int64_t> partial_shape = config_.embedding_shape;
+  partial_shape.insert(partial_shape.begin(), config_.block_size);
+  slot_group_->AppendEmbSlot(config_.dtype, partial_shape, config_.generator);
+
+  children_info_ =
+      torch::make_intrusive<recis::embedding::ChildrenInfo>(config_.coalesce);
+  for (const auto &child : config_.children) {
+    children_info_->AddChild(child);
+  }
+  children_info_->Validate();
+
+  slice_info_ = at::make_intrusive<recis::embedding::SliceInfo>(
+      config_.slice_begin, config_.slice_end, config_.slice_size);
+
+  id_map_ = recis::embedding::MakeIdMap(config_.device);
+
+  grad_ = {};
+  grad_index_ = {};
 }
 
 void Hashtable::AcceptGrad(const torch::Tensor &grad_index,
@@ -103,7 +120,7 @@ void Hashtable::AcceptGrad(const torch::Tensor &grad_index,
   grad_.push_back(grad);
 }
 
-torch::Tensor Hashtable::grad(int64_t accmulate_steps) {
+torch::Tensor Hashtable::Grad(int64_t accmulate_steps) {
   auto index = torch::cat(grad_index_, 0);
   auto grad_outputs = torch::cat(grad_, 0);
   auto output = at::_unique(index, false, true);
@@ -167,7 +184,7 @@ std::tuple<torch::Tensor, torch::Tensor> Hashtable::EmbeddingLookup(
   torch::Tensor ids_t =
       ids.to(slot_group_->EmbSlot()->TensorOptions().device());
   torch::Tensor index = id_map_->Lookup(ids_t);
-  increment_blocknum(id_map_->GetIdNum());
+  IncrementBlocknum(id_map_->GetIdNum());
   auto emb_slot = slot_group_->EmbSlot();
   torch::Tensor out_embedding = recis::functional::block_gather(
       index, (*emb_slot->Values()), slot_group_->BlockSize(), kNullIndex,
@@ -206,20 +223,6 @@ void Hashtable::UpdateSlot(const std::string &slot_name,
   slot->IndexInsert(index_t, embedding_t);
 }
 
-torch::Tensor Hashtable::ids() {
-  auto ids = id_map_->Ids();
-  return ids;
-}
-
-void Hashtable::Clear() {
-  grad_.clear();
-  grad_index_.clear();
-  id_map_->Clear();
-  slot_group_->Clear();
-}
-
-void Hashtable::ClearId() { id_map_->Clear(); }
-
 void Hashtable::Reserve(size_t id_size) {
   id_size = id_size / slice_info_->partition_num();
   id_map_->Reserve(id_size);
@@ -230,7 +233,7 @@ std::tuple<torch::Tensor, torch::Tensor> Hashtable::EmbeddingLookupReadOnly(
   torch::Tensor ids_t =
       ids.to(slot_group_->EmbSlot()->TensorOptions().device());
   torch::Tensor index = id_map_->LookupReadOnly(ids_t);
-  increment_blocknum(id_map_->GetIdNum());
+  IncrementBlocknum(id_map_->GetIdNum());
   auto emb_slot = slot_group_->EmbSlot();
   torch::Tensor out_embedding = recis::functional::block_gather(
       index, (*emb_slot->Values()), slot_group_->BlockSize(), kNullIndex, true);
@@ -241,7 +244,7 @@ torch::Tensor Hashtable::InsertLookupIndex(const torch::Tensor &ids) {
   torch::Tensor ids_t =
       ids.to(slot_group_->EmbSlot()->TensorOptions().device());
   auto index = id_map_->InsertIds(ids_t);
-  increment_blocknum(id_map_->GetIdNum());
+  IncrementBlocknum(id_map_->GetIdNum());
   return index;
 }
 
@@ -263,7 +266,7 @@ torch::Tensor Hashtable::LookupIndexReadOnly(const torch::Tensor &ids) {
   return index;
 }
 
-void Hashtable::increment_blocknum(int64_t ids_num) {
+void Hashtable::IncrementBlocknum(int64_t ids_num) {
   size_t block_num =
       (ids_num + slot_group_->BlockSize()) / slot_group_->BlockSize();
   while (slot_group_->BlockNum() < block_num) {
@@ -272,7 +275,7 @@ void Hashtable::increment_blocknum(int64_t ids_num) {
 }
 
 void Hashtable::Delete(const torch::Tensor &ids, const torch::Tensor &index,
-                       const std::string &preserve_slot = {}) {
+                       const std::string &preserve_slot) {
   if (ids.numel() == 0) {
     return;
   }
@@ -288,17 +291,45 @@ void Hashtable::Delete(const torch::Tensor &ids, const torch::Tensor &index,
   }
 }
 
-void Hashtable::ClearChild(const std::string &child) {
-  TORCH_CHECK(children_info_->HasChild(child), "hashtable ", child,
-              " must be the child of this coalseced hashtable")
+std::tuple<torch::Tensor, torch::Tensor> Hashtable::GatherChildIds(
+    const std::string &child) {
+  if (child.empty()) {
+    auto [ids, index] = id_map_->SnapShot();
+    return std::make_tuple(ids, index);
+  }
+  TORCH_CHECK(children_info_->HasChild(child), "hashtable ", child, "Child '",
+              child, "' not found in hashtable")
   int64_t child_index = children_info_->ChildIndex(child);
-  torch::Tensor coalesced_ids, coalseced_index;
-  std::tie(coalesced_ids, coalseced_index) = ids_map();
+  auto [coalesced_ids, coalseced_index] = id_map_->SnapShot();
   auto decode_index = at::bitwise_right_shift(coalesced_ids, kMaskLength);
   auto mask = at::eq(decode_index, child_index);
-  auto child_delete_ids = at::masked_select(coalesced_ids, mask);
-  auto child_delete_index = at::masked_select(coalseced_index, mask);
-  Delete(child_delete_ids, child_delete_index);
+  auto gather_ids = at::masked_select(coalesced_ids, mask);
+  auto gather_index = at::masked_select(coalseced_index, mask);
+  return std::make_tuple(gather_ids, gather_index);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+Hashtable::GatherChildEmbs(const std::string &child) {
+  auto [child_ids, child_index, child_slots] = GatherChild(
+      child, {std::string(recis::embedding::SlotGroup::EmbSlotName())});
+  return std::make_tuple(child_ids, child_index, child_slots[0]);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, std::vector<torch::Tensor>>
+Hashtable::GatherChild(const std::string &child,
+                       const std::vector<std::string> &slot_names) {
+  auto [child_ids, child_index] = GatherChildIds(child);
+  IncrementBlocknum(id_map_->GetIdNum());
+  std::vector<torch::Tensor> child_slots;
+  child_slots.reserve(slot_names.size());
+  for (const auto &slot_name : slot_names) {
+    auto slot = slot_group_->GetSlotByName(slot_name);
+    torch::Tensor child_slot = recis::functional::block_gather(
+        child_index, *(slot->Values()), slot_group_->BlockSize(), kNullIndex,
+        true);
+    child_slots.push_back(std::move(child_slot));
+  }
+  return {child_ids, child_index, child_slots};
 }
 
 void Hashtable::AppendFilterSlot(

@@ -362,37 +362,160 @@ class HashTable(torch.nn.Module):
         """
         self._hashtable_impl.insert(ids, embeddings)
 
-    def clear(self) -> None:
-        """Clear all stored embeddings."""
-        self._hashtable_impl.clear()
+    def reset(self) -> None:
+        """Resets the hashtable to its initial factory state. clears all IDs/embeddings and physically releases underlying memory resources."""
+        self._hashtable_impl.reset()
 
-    def clear_child(self, child) -> None:
-        """Clear child hashtable."""
-        self._hashtable_impl.clear_child(child)
-
-    def ids(self) -> torch.Tensor:
-        """Get all stored feature IDs.
-
-        Returns:
-            torch.Tensor: All feature IDs currently stored in the table.
+    def clear(self, child=None) -> None:
         """
-        return self._hashtable_impl.ids()
+        Performs a logical clear of stored embeddings or specific child table IDs.
 
-    def ids_map(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Get mapping between feature IDs and internal indices.
+        Preserves underlying memory capacity for fast reuse.
+        To physically free memory, use the `reset()` method.
 
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]: (feature_ids, internal_indices)
+        Args:
+            child (str, optional):
+                The name of the child table/group to clear IDs from.
+
+                * If None (default), the operation is applied to the
+                    entire coalesced hashtable.
+                * If a string is provided, the operation is scoped to the
+                    specified child-table.
         """
-        return self._hashtable_impl.ids_map()
+        self._hashtable_impl.clear(child)
 
-    def embeddings(self) -> torch.Tensor:
-        """Get all stored embeddings.
+    def ids(self, child=None) -> torch.Tensor:
+        """
+        Get the feature IDs currently stored in the table or a specific child-table.
+
+        Args:
+            child (str, optional):
+                The name of the child table/group to retrieve IDs from.
+
+                * If None (default), returns IDs from the entire
+                    coalesced table.
+                * If a string is provided, returns IDs only from the
+                    specified child-table.
 
         Returns:
-            torch.Tensor: All embedding values currently stored in the table.
+            torch.Tensor: All feature IDs currently stored (or in the child-table).
+        """
+        return self._hashtable_impl.ids(child)
+
+    def ids_map(self, child=None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get the mapping between feature IDs and their internal storage indices
+        for the entire table or a specific child-table.
+
+        Args:
+            child (str, optional):
+                The name of the child table/group to retrieve the mapping from.
+
+                * If None (default), returns the mapping for the entire
+                    coalesced table.
+                * If a string is provided, returns the mapping for the
+                    specified child-table only.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                A tuple containing: (feature_ids, internal_indices).
+        """
+        return self._hashtable_impl.ids_map(child)
+
+    def embeddings(self, child=None) -> torch.Tensor:
+        """
+        Retrieves all embedding values currently stored in the table or a specific child-table.
+
+        Args:
+            child (str, optional):
+                The name of the child table/group to retrieve embeddings from.
+
+                * If None (default), returns embeddings from the entire
+                    coalesced table.
+                * If a string is provided, returns embeddings only from the
+                    specified child-table.
+
+        Returns:
+            torch.Tensor: All embedding values currently stored (or in the child-table).
+        """
+        return self._hashtable_impl.embs(child)
+
+    def embeddings_map(self, child=None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Gets the mapping between internal storage indices and their corresponding embedding.
+
+        Args:
+            child (str, optional):
+                The name of the child table/group to retrieve the mapping from.
+
+                * If None (default), returns the mapping for the entire
+                    coalesced table.
+                * If a string is provided, returns the mapping for the
+                    specified child-table only.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                A tuple containing: (internal_indices, embeddings).
+        """
+        return self._hashtable_impl.embs_map(child)
+
+    def ids_embeddings(self, child=None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Retrieves the mapping between feature IDs and their associated embedding.
+
+        Args:
+            child (str, optional):
+                The name of the child table/group to retrieve the mapping from.
+
+                * If None (default), returns the mapping for the entire
+                    coalesced table.
+                * If a string is provided, returns the mapping for the
+                    specified child-table only.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                A tuple containing: (feature_ids, embeddings).
+        """
+        return self._hashtable_impl.ids_embs(child)
+
+    def snap_shot(self, child=None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Captures a complete snapshot of the table's state, including the full
+        ID-to-Index-to-Embedding relationship.
+
+        This method retrieves all three primary components: feature IDs, internal
+        storage indices, and the embedding vectors themselves.
+
+        Args:
+            child (str, optional):
+                The name of the child table/group to retrieve the snapshot from.
+
+                * If None (default), captures the snapshot of the entire
+                    coalesced table.
+                * If a string is provided, captures the snapshot for the
+                    specified child-table only.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                A tuple containing: (feature_ids, internal_indices, embeddings).
+        """
+        return self._hashtable_impl.snap_shot(child)
+
+    def raw_embeddings(self) -> torch.Tensor:
+        """Get a copy of the underlying embedding buffer that backs the table.
+
+        Returns:
+            torch.Tensor: a copy of the underlying embedding buffer that backs the table.
+        Note:
+            To retrieve only valid embeddings, use `embeddings()` or `embeddings_map()`.
         """
         return self._hashtable_impl.slot_group().slot_by_name("embedding").value()
+
+    def allocator_id_info(self):
+        return self._hashtable_impl.allocator_id_info()
+
+    def id_info(self):
+        return self._hashtable_impl.id_info()
 
     def slot_group(self):
         """Get the slot group for advanced operations.

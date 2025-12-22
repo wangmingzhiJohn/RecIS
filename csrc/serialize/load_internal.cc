@@ -43,7 +43,7 @@ class HTSlotsEmptyInitializerContext {
   }
 
   ~HTSlotsEmptyInitializerContext() {
-    int64_t last_copy_index = ht_->ids_num() % ht_->SlotGroup()->BlockSize();
+    int64_t last_copy_index = ht_->IdsNum() % ht_->SlotGroup()->BlockSize();
     int64_t rest_num = ht_->SlotGroup()->BlockSize() - last_copy_index;
     for (auto kv : slot_initializer_map_) {
       embedding::Slot *slot = (embedding::Slot *)kv.first;

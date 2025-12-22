@@ -840,7 +840,7 @@ class Saver:
                             logger.info(
                                 f"Clearing hashtable: {ht_name} for variable: {var_name}"
                             )
-                            hashtable_obj.clear_child(ht_name)
+                            hashtable_obj.clear(ht_name)
 
     def _load_variables(self, model_bank: dict):
         for path, vars in model_bank.items():

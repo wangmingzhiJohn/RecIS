@@ -322,7 +322,7 @@ class BaseFilterHookImpl(torch.nn.Module):
         filtering logic, and removes the filtered features. It also calls
         the after_filter callback for logging or cleanup.
         """
-        ids, index = self._ht.ids_map()
+        ids, index = self._ht.ids_map(None)
         delete_ids, delete_index = self.filter(ids, index)
         self._ht.delete(delete_ids, delete_index, self._name)
         self.after_filter(ids, delete_ids)

@@ -96,14 +96,11 @@ TORCH_LIBRARY(recis, m) {
 
   m.class_<Hashtable>("HashtableImpl")
       .def("accept_grad", &Hashtable::AcceptGrad)
-      .def("grad", &Hashtable::grad)
+      .def("grad", &Hashtable::Grad)
       .def("clear_grad", &Hashtable::ClearGrad)
       .def("embedding_lookup", &Hashtable::EmbeddingLookup)
       .def("insert", &Hashtable::Insert)
-      .def("clear", &Hashtable::Clear)
-      .def("clear_child", &Hashtable::ClearChild)
-      .def("clear_id", &Hashtable::ClearId)
-      .def("ids", &Hashtable::ids)
+      .def("reset", &Hashtable::Reset)
       .def("slot_group", &Hashtable::SlotGroup)
       .def("children_info", &Hashtable::ChildrenInfo)
       .def("append_filter_slot", &Hashtable::AppendFilterSlot)
@@ -111,11 +108,45 @@ TORCH_LIBRARY(recis, m) {
       .def("update_slot", &Hashtable::UpdateSlot)
       .def("get_slot", &Hashtable::GetSlot)
       .def("delete", &Hashtable::Delete)
-      .def("ids_map", &Hashtable::ids_map)
-      .def("id_info", &Hashtable::id_info)
-      .def("allocator_id_info", &Hashtable::allocator_id_info)
-      .def("id_memory_info", &Hashtable::id_memory_info)
-      .def("emb_memory_info", &Hashtable::emb_memory_info)
+      .def("clear",
+           [](const c10::intrusive_ptr<Hashtable>& self,
+              c10::optional<std::string> child) {
+             return self->Clear(child.value_or(std::string{}));
+           })
+      .def("ids",
+           [](const c10::intrusive_ptr<Hashtable>& self,
+              c10::optional<std::string> child) {
+             return self->Ids(child.value_or(std::string{}));
+           })
+      .def("ids_map",
+           [](const c10::intrusive_ptr<Hashtable>& self,
+              c10::optional<std::string> child) {
+             return self->IdsMap(child.value_or(std::string{}));
+           })
+      .def("embs",
+           [](const c10::intrusive_ptr<Hashtable>& self,
+              c10::optional<std::string> child) {
+             return self->Embs(child.value_or(std::string{}));
+           })
+      .def("embs_map",
+           [](const c10::intrusive_ptr<Hashtable>& self,
+              c10::optional<std::string> child) {
+             return self->EmbsMap(child.value_or(std::string{}));
+           })
+      .def("ids_embs",
+           [](const c10::intrusive_ptr<Hashtable>& self,
+              c10::optional<std::string> child) {
+             return self->IdsEmbs(child.value_or(std::string{}));
+           })
+      .def("snap_shot",
+           [](const c10::intrusive_ptr<Hashtable>& self,
+              c10::optional<std::string> child) {
+             return self->SnapShot(child.value_or(std::string{}));
+           })
+      .def("id_info", &Hashtable::IdInfo)
+      .def("allocator_id_info", &Hashtable::AllocatorIdInfo)
+      .def("id_memory_info", &Hashtable::IdMemoryInfo)
+      .def("emb_memory_info", &Hashtable::EmbMemoryInfo)
       .def_readonly("hashtable_tag", &Hashtable::kNullIndex);
 
   // optimzier

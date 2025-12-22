@@ -145,7 +145,7 @@ def nested_dict():
     return defaultdict(nested_dict)
 
 
-class HashTableClearChildTest(unittest.TestCase):
+class HashTableClearTest(unittest.TestCase):
     DEVICE = None
     CKPT_DIR = None
 
@@ -157,7 +157,7 @@ class HashTableClearChildTest(unittest.TestCase):
         os.environ["MASTER_PORT"] = str(common.find_free_port())
         dist.init_process_group()
         cls.DEVICE = os.getenv("TEST_DEVICE", "cuda")
-        cls.CKPT_DIR = os.getenv("CKPT_DIR", "./clear_child_ckpt_cuda")
+        cls.CKPT_DIR = os.getenv("CKPT_DIR", "./clear_ckpt_cuda")
         os.makedirs(cls.CKPT_DIR, exist_ok=True)
 
     @classmethod
@@ -379,7 +379,7 @@ class HashTableClearChildTest(unittest.TestCase):
             )
         )
 
-    def testClearChild(self):
+    def testClear(self):
         hta = self.tables["group_a"]["ht"]
         ### init hashtable with some id
         for step in range(1):
@@ -410,7 +410,7 @@ class HashTableClearChildTest(unittest.TestCase):
             self.assertTrue(mmap.max().item() == 12)
 
         child_ids, child_index = filter_child_ids(hta, self.encode_ids["fea_1"])
-        hta.clear_child("ht1")
+        hta.clear("ht1")
         ids, _ = self.tables["group_a"]["ht"].ids_map()
         self.checkDeleteSlot(
             ids,
@@ -461,13 +461,13 @@ class HashTableClearChildTest(unittest.TestCase):
             self.opt.zero_grad()
 
         child_ids, child_index = filter_child_ids(hta, self.encode_ids["fea_1"])
-        hta.clear_child("ht1")
+        hta.clear("ht1")
         ids, _ = self.tables["group_a"]["ht"].ids_map()
         self.checkDeleteSlot(
             ids, fea_2_ids, self.encode_ids["fea_2"], "group_a", child_index, 3.0
         )
         child_ids, child_index = filter_child_ids(hta, self.encode_ids["fea_2"])
-        hta.clear_child("ht2")
+        hta.clear("ht2")
         self.checkDeleteSlot(
             None, None, self.encode_ids["fea_2"], "group_a", child_index, 3.0
         )
@@ -476,7 +476,7 @@ class HashTableClearChildTest(unittest.TestCase):
         ids, mmap = self.tables["group_a"]["ht"].ids_map()
         self.assertTrue(len(ids) == 0 and len(mmap) == 0)
         # clear empty child. nothing happened
-        hta.clear_child("ht2")
+        hta.clear("ht2")
         for step in range(4, 5):
             step_id = self.ids[f"step_{step}"]
             out = self.ee(step_id)
@@ -489,14 +489,14 @@ class HashTableClearChildTest(unittest.TestCase):
         fea_1_ids = torch.unique(torch.cat([self.ids["step_4"]["fea_1"].values()]))
 
         child_ids, child_index = filter_child_ids(hta, self.encode_ids["fea_4"])
-        hta.clear_child("ht3")
+        hta.clear("ht3")
         ids, _ = self.tables["group_a"]["ht"].ids_map()
         self.checkDeleteSlot(
             ids, fea_1_ids, self.encode_ids["fea_1"], "group_a", child_index, 3.0
         )
         # now, there is only ht1 in the coalseced hashtable
 
-        ### test save ###
+        ### test save after clear ###
         saver = SSaver(
             shard_index=0,
             shard_num=1,
@@ -509,13 +509,54 @@ class HashTableClearChildTest(unittest.TestCase):
 
         cr = CheckpointReader(self.CKPT_DIR)
         for i in range(1, 4):
+            ids = cr.read_tensor(f"ht{i}@id")
             emb = cr.read_tensor(f"ht{i}@embedding")
             exp_avg = cr.read_tensor(f"ht{i}@sparse_adamw_tf_exp_avg")
             exp_avg_sq = cr.read_tensor(f"ht{i}@sparse_adamw_tf_exp_avg_sq")
             if i != 1:
                 self.assertTrue(
-                    len(emb) == 0 and len(exp_avg) == 0 and len(exp_avg_sq) == 0
+                    len(ids) == 0
+                    and len(emb) == 0
+                    and len(exp_avg) == 0
+                    and len(exp_avg_sq) == 0
                 )
+
+        ### test clear all
+        hta.clear()
+        act_sz, sz = hta.allocator_id_info()
+        self.assertTrue(act_sz == 0)
+        self.assertTrue(sz != 0)
+        raw_emb = hta.raw_embeddings()
+        self.assertTrue(torch.all(raw_emb == 3.0).item())
+
+        ### test reset
+        for step in range(4):
+            step_id = self.ids[f"step_{step}"]
+            out = self.ee(step_id)
+            (out["fea_1"].sum() + out["fea_2"].sum()).backward()
+            self.opt.step()
+            self.opt.zero_grad()
+        hta.reset()
+        raw_emb = hta.raw_embeddings()
+        act_sz, sz = hta.allocator_id_info()
+        self.assertTrue(act_sz == 0)
+        self.assertTrue(sz == 0)
+        self.assertTrue(torch.all(raw_emb == 3.0).item())
+        ### test insert after reset
+        for step in range(4):
+            step_id = self.ids[f"step_{step}"]
+            out = self.ee(step_id)
+            (out["fea_1"].sum() + out["fea_2"].sum()).backward()
+            self.opt.step()
+            self.opt.zero_grad()
+        hta.reset()
+        saver.save()
+        ### test save after reset
+        cr = CheckpointReader(self.CKPT_DIR)
+        for i in range(1, 4):
+            ids = cr.read_tensor(f"ht{i}@id")
+            emb = cr.read_tensor(f"ht{i}@embedding")
+            self.assertTrue(len(emb) == 0 and len(ids) == 0)
 
 
 if __name__ == "__main__":

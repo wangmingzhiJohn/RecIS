@@ -43,7 +43,7 @@ std::vector<at::intrusive_ptr<WriteBlock>> WriteBlock::MakeHTWriteBlock(
   }
   torch::Tensor ids, index;
   std::tie(ids, index) = [&] {
-    auto [a, b] = ht->ids_map();
+    auto [a, b] = ht->IdsMap();
     return std::make_tuple(a.cpu(), b.cpu());
   }();
   auto ids_vec = ids.data_ptr<int64_t>();

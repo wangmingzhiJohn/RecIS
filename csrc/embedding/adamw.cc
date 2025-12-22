@@ -108,10 +108,10 @@ void SparseAdamW::step() {
       if (!p.defined()) {
         continue;
       }
-      if (!p->has_grad()) {
+      if (!p->HasGrad()) {
         continue;
       }
-      const auto &grad = p->grad(grad_accum_steps_);
+      const auto &grad = p->Grad(grad_accum_steps_);
       if (!grad.defined()) {
         continue;
       }

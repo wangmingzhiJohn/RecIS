@@ -95,7 +95,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         dense_emb = model._dense_param
         self.assertTrue(
             np.allclose(
@@ -115,7 +115,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         dense_emb = model._dense_param
         dense_emb_one = torch.tensor([list(dense_emb[0])])
         self.assertTrue(
@@ -144,7 +144,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         dense_emb = model._dense_param
         self.assertTrue(
             np.allclose(
@@ -191,7 +191,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         dense_emb = model._dense_param
         self.assertTrue(
             np.allclose(
@@ -216,7 +216,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         dense_emb = model._dense_param
         self.assertTrue(
             np.allclose(
@@ -251,7 +251,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         dense_emb = model._dense_param
         self.assertTrue(
             np.allclose(
@@ -303,7 +303,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         self.assertTrue(emb_one_embs.numel() == 1024 * 4)
         optim.zero_grad()
         dense_optim.zero_grad()
@@ -315,7 +315,7 @@ class Test(unittest.TestCase):
         loss.backward()
         optim.step()
         dense_optim.step()
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         self.assertTrue(emb_one_embs.numel() == 1024 * 4)
         optim.zero_grad()
         dense_optim.zero_grad()
@@ -328,7 +328,7 @@ class Test(unittest.TestCase):
         optim.step()
         dense_optim.step()
         torch.logical_and
-        emb_one_embs = model._emb_one.embeddings()
+        emb_one_embs = model._emb_one.raw_embeddings()
         self.assertTrue(emb_one_embs.numel() == 1024 * 4)
         optim.zero_grad()
         dense_optim.zero_grad()
