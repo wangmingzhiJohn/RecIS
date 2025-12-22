@@ -67,6 +67,7 @@ class TrainingArguments:
         saver_option (Optional[SaverOptions]): Options for checkpoint saver. Defaults to None.
         ckpt_save_arg (Optional[CheckpointSaveArguments]): Arguments for checkpoint save. Defaults to None.
         ckpt_load_arg (Optional[CheckpointLoadArguments]): Arguments for checkpoint load. Defaults to None.
+        mixed_precision (Optional[str]): Mixed precision training mode. Defaults to None. Only support "bf16" and "fp16".
     """
 
     gradient_accumulation_steps: int = 1
@@ -90,6 +91,7 @@ class TrainingArguments:
     saver_option: Optional[SaverOptions] = None
     ckpt_save_arg: Optional[CheckpointSaveArguments] = None
     ckpt_load_arg: Optional[CheckpointLoadArguments] = None
+    mixed_precision: Optional[str] = None
 
 
 class Trainer:
@@ -197,11 +199,15 @@ class Trainer:
         self.dense_lr_scheduler = dense_optimizers[1]
         self.sparse_optimizer = sparse_optimizer
         self.data_to_cuda = data_to_cuda
+        self.mixed_precision = args.mixed_precision
+        if self.mixed_precision is not None:
+            assert self.mixed_precision in ["bf16", "fp16"], "mixed_precision must be 'bf16' or 'fp16'"
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         init_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=1800))
         self.accelerator = Accelerator(
             kwargs_handlers=[ddp_kwargs, init_kwargs],
             gradient_accumulation_steps=args.gradient_accumulation_steps,
+            mixed_precision=self.mixed_precision,
             **kwargs,
         )
         self.gradient_accumulation_steps = args.gradient_accumulation_steps
@@ -559,7 +565,8 @@ class Trainer:
         self.dense_optimizer.zero_grad()
         if self.sparse_optimizer is not None:
             self.sparse_optimizer.zero_grad()
-        loss = self.model(data)
+        with self.accelerator.autocast():
+            loss = self.model(data)
         metrics.update(epoch=epoch)
         metrics.update(loss=loss)
         metrics.update(get_global_metrics())
