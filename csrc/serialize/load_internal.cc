@@ -132,7 +132,7 @@ void LoaderInternal::BuildHTLoadCollection(
                   slice_info->IsIntersect(target_ht->SliceInfo())) {
                 if (read_collections.count(slice_info_str) == 0) {
                   read_collections[slice_info_str] =
-                      HTReadCollection::Make(load_shared_name);
+                      HTReadCollection::Make(shared_name);
                 }
                 auto read_collection = read_collections[slice_info_str];
                 auto block_name = BlockNameEncode(tensor_name, slice_info_str);
