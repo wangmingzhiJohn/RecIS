@@ -70,7 +70,7 @@ std::tuple<torch::Tensor, torch::Tensor> dense_to_ragged(
     int rows = data.size(0);
     int cols = data.size(1);
     torch::Tensor offsets = torch::arange(
-        0, rows + 1, cols,
+        0, rows * cols + 1, cols,
         torch::TensorOptions().dtype(torch::kInt32).device(device));
     return std::make_tuple(data.view(-1), offsets);
   }

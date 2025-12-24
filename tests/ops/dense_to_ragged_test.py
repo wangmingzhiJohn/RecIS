@@ -66,7 +66,7 @@ class TestDenseToRagged(unittest.TestCase):
                     self.assertTrue(torch.equal(data.view(-1), values_ret))
                     rows = data.shape[0]
                     cols = data.shape[1]
-                    offsets = torch.arange(0, rows + 1, cols, device=device).to(
+                    offsets = torch.arange(0, rows * cols + 1, cols, device=device).to(
                         torch.int
                     )
                     self.assertTrue(torch.equal(offsets, offsets_ret))
