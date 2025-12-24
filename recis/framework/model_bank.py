@@ -35,7 +35,7 @@ class ModelBankEntry:
 
     is_dynamic: bool = False
     hashtable_clear: bool = True
-    ignore_error: bool = True
+    ignore_error: bool = False
     skip: bool = False
     oname: list[dict] = field(default_factory=list)
 
@@ -51,13 +51,13 @@ class ModelBankEntry:
 
     def __post_init__(self):
         if self.skip:
-            logger.warning("'skip' is True, skip this model bank.")
+            logger.warning(f"'skip' is True, skip this model bank: {self.path}.")
             return
 
         if not isinstance(self.path, str):
             raise TypeError(f"'path' must be a string, got {type(self.path).__name__}")
         if not self.path.strip():
-            logger.warning("'path' is empty, not load any model.")
+            raise RuntimeError("'path' is empty, not load any model.")
 
         if isinstance(self.load, list):
             object.__setattr__(self, "load", set(self.load))
@@ -186,7 +186,7 @@ def maybe_get_latest_version(path, force_sub_version=False):
                     continue
                 ckpt_id = version.strip()
                 break
-        logger.info(f"Get latest checkpoint version {ckpt_id} from path {path}.")
+        logger.warning(f"Get latest checkpoint version {ckpt_id} from path {path}.")
     else:
         logger.warning(f"Checkpoint not found in path: {path}")
     if ckpt_id is not None:
@@ -195,7 +195,7 @@ def maybe_get_latest_version(path, force_sub_version=False):
         real_path = path
         if force_sub_version:
             real_path = ""
-    logger.info(f"Get real ckpt path {real_path} from {path}")
+    logger.warning(f"Get real ckpt path {real_path} from {path}")
     return real_path
 
 
@@ -216,6 +216,7 @@ def show_model_bank_format(name: str, model_bank):
         logger.warning(f"No {name} model bank to show")
         return
 
+    res = f"============= {name} =============\n"
     all_names = []
     all_dyn_strs = []
     all_clear_strs = []
@@ -240,20 +241,20 @@ def show_model_bank_format(name: str, model_bank):
     sep_line = "-" * len(header)
 
     for path, tensors in model_bank.items():
-        logger.info(f"Checkpoint: {path}")
-        logger.info("=" * len(header))
-        logger.info(header)
-        logger.info(sep_line)
+        res += f"Checkpoint: {path}\n"
+        res += "=" * len(header) + "\n"
+        res += header + "\n"
+        res += sep_line + "\n"
         for name in sorted(tensors, key=lambda x: ("@" not in x, x)):
             meta = tensors[name]
             dyn = str(meta.get("is_dynamic", ""))
             clear = str(meta.get("hashtable_clear", ""))
             oname = str(meta.get("oname", ""))
-            logger.info(
-                f"{name.ljust(name_width)}  {dyn.ljust(dyn_width)}  {clear.ljust(clear_width)}  {oname.ljust(oname_width)}"
-            )
-        logger.info("=" * len(header))
-        logger.info("\n")
+            res += f"{name.ljust(name_width)}  {dyn.ljust(dyn_width)}  {clear.ljust(clear_width)}  {oname.ljust(oname_width)}"
+            res += "\n"
+        res += "=" * len(header) + "\n"
+        res += "\n"
+    logger.info(res)
 
 
 def raise_error(core_text: str, message: str, ignore_error: bool):
@@ -279,7 +280,7 @@ def get_match_by_pattern(pattern: str, var_list: set[str]):
         return {var for var in var_list if fnmatch.fnmatch(var, pattern)}
     elif pattern in var_list:
         return {pattern}
-    return set[str]()
+    raise ValueError(f"Bad pattern: {pattern} couldn't match any variable")
 
 
 def load_pt_file(ckpt_dir: str, file_name: str):
@@ -311,8 +312,8 @@ def parse_sparse_oname(
         if not matched_src_names:
             raise_error(
                 src_table,
-                f"Bad oname, src table {dst_table} not found in src_names",
-                ignore_error,
+                f"[sparse_oname] Bad oname, src table {src_table} not found in src_names",
+                True,
             )
             continue
 
@@ -320,15 +321,15 @@ def parse_sparse_oname(
         if not matched_dst_names:
             raise_error(
                 dst_table,
-                f"Bad oname, Dst table {dst_table} not found in dst_names",
-                ignore_error,
+                f"[sparse_oname] Bad oname, dst table {dst_table} not found in dst_names",
+                True,
             )
             continue
 
         if len(matched_dst_names) != len(matched_src_names):
             raise_error(
                 "",
-                f"Bad oname, Dst table {matched_dst_names} has different number of variables than src table {matched_src_names}",
+                f"[sparse_oname] Bad oname, Dst table {matched_dst_names} has different number of variables than src table {matched_src_names}",
                 False,
             )
             continue
@@ -342,7 +343,7 @@ def parse_sparse_oname(
             if dst_name not in dst_names:
                 raise_error(
                     src_table,
-                    f"Bad oname, Dst name {dst_name} not found in dst_names",
+                    f"[sparse_oname] Bad oname, Dst name {dst_name} not found in dst_names",
                     ignore_error,
                 )
                 continue
@@ -413,12 +414,12 @@ def parse_dense_oname(
         if mapped_key:
             if mapped_key in dst_keys_set:
                 dense_oname[key] = mapped_key
-                logger.info(f"T {key} <- {mapped_key} (from dst_sd)")
+                logger.warning(f"[dense_oname] T {key} <- {mapped_key} (from dst_sd)")
             else:
                 raise_error(
                     key,
-                    f"F {key} -> {mapped_key} (not found in dst_sd)",
-                    ignore_error,
+                    f"[dense_oname] F {key} -> {mapped_key} (not found in dst_sd)",
+                    True,
                 )
 
     return dense_oname
@@ -484,7 +485,7 @@ class ModelBankParser:
         self._dense_pattern_matcher = DensePatternMatcher()
         self._reset_work_state()
 
-        logger.info("checking model bank...")
+        logger.warning("checking model bank...")
         self._is_model_bank_valid()
 
     def _reset_work_state(self):
@@ -502,7 +503,7 @@ class ModelBankParser:
                     raise_error(
                         name,
                         f"Variable {name} not found in model names",
-                        bank[MBC.IGNORE_ERROR],
+                        False,
                     )
 
     def has_bank(self):
@@ -536,10 +537,9 @@ class ModelBankParser:
         ckpt_path = path
         ckpt_path = get_update_path(path)
         if ckpt_path == "":
-            logger.warning(f"No update path found in {path}")
-            return sparse_names, dense_names, extra_names
+            raise RuntimeError(f"No update path found in {path}")
 
-        logger.info(f"final ckpt_path = {ckpt_path}")
+        logger.info(f"get ckpt names from ckpt_path: {ckpt_path}")
         fs = get_file_system(os.path.join(ckpt_path, "index"))
 
         reader = CheckpointReader(ckpt_path)
@@ -626,13 +626,13 @@ class ModelBankParser:
         var_dict = {}
         for bank in reversed(model_bank):
             if len(self._model_names) == 0:
-                logger.info("all variables are loaded, break parse model bank.")
+                logger.warning("all variables are loaded, break parse model bank.")
                 break
             path = bank.path
             dst_sparse_names, dst_dense_names, extra_names = self._get_dst_names(path)
             dst_names = dst_sparse_names | dst_dense_names | extra_names
             if len(dst_names) == 0:
-                logger.warning(f"No dst vars found in {path}")
+                logger.warning(f"No dst vars found in ckpt: {path}")
                 continue
 
             exclude_names_set = self._get_names_set(bank.exclude)
@@ -641,7 +641,9 @@ class ModelBankParser:
 
             need_load_names = load_names_set - exclude_names_set
             if len(need_load_names) == 0:
-                logger.warning(f"No need to load vars in {path}")
+                logger.warning(
+                    f"No need to load vars in {path} because all vars are excluded"
+                )
                 continue
 
             # parse oname
@@ -685,10 +687,12 @@ class ModelBankParser:
         return var_dict
 
     def parse_all_model_bank(self):
+        logger.info("parse all model bank")
         self._reset_work_state()
         return self._get_parse_result(self._model_bank)
 
     def parse_dynamic_model_bank(self):
+        logger.info("parse dynamic model bank")
         self._reset_work_state()
         dynamic_model_bank = []
         for bank in self._model_bank:
@@ -697,10 +701,7 @@ class ModelBankParser:
         return self._get_parse_result(dynamic_model_bank)
 
     def _get_parse_result(self, model_bank: list[ModelBankEntry]):
-        logger.info("Travel model bank reversely...")
         var_dict = self._travel_model_bank_reversely(model_bank)
-
-        logger.info("Combine bank by path...")
         return self._combine_bank_by_path(var_dict)
 
     def _combine_bank_by_path(self, var_dict: dict):

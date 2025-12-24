@@ -80,6 +80,5 @@ class Loader:
         """
         load_info = json.loads(self._impl.default_load_info())
         load_info = self._filter_func(load_info)
-        logger.info(json.dumps(load_info, indent=4))
         load_size = self._impl.load(json.dumps(load_info))
         MetricReporter.report(LOAD_SIZE_NAME, load_size, force=True)

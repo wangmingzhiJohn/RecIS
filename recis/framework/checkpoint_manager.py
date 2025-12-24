@@ -198,14 +198,6 @@ class Saver:
             self._dense_names | self._sparse_names | ExtraFields.all_fields()
         )
 
-        logger.info("============ Model Name Sparse and Dense ====================")
-        for name in self._dense_names:
-            logger.info(f"Dense Model Name: {name}")
-        for name in self._sparse_names:
-            logger.info(f"Sparse Model Name: {name}")
-        for name in ExtraFields.all_fields():
-            logger.info(f"Extra Model Name: {name}")
-
         self._model_bank_content = options.model_bank
         self._has_bank = False
         if self._model_bank_content is None or (
@@ -267,13 +259,11 @@ class Saver:
             self._show_model_bank_table()
 
     def _show_model_bank_table(self):
-        logger.info("============ Init Bank Format =============")
         show_model_bank_format(
             "all_model_bank",
             self._all_model_bank,
         )
 
-        logger.info("============ Dynamic Bank Format =============")
         show_model_bank_format(
             "dynamic_model_bank",
             self._dynamic_model_bank,
@@ -583,11 +573,10 @@ class Saver:
             tensors=dense_state_dict,
             filter_func=filter_func,
         )
+        logger.info(f"load sparse model from checkpoint {ckpt_dir}")
         loader.load()
 
-    def _load_dense_model(
-        self, ckpt_dir: str, model_bank_conf: dict, strict: bool
-    ) -> set[str]:
+    def _load_dense_model(self, ckpt_dir: str, model_bank_conf: dict) -> set[str]:
         """Load dense model parameters from checkpoint.
 
         Args:
@@ -604,7 +593,6 @@ class Saver:
             if MBC.ONAME in model_bank_conf[k]:
                 oname = model_bank_conf[k][MBC.ONAME]
                 if oname in state_dict_loaded:
-                    logger.info(f"debug info: {k} -> {oname}")
                     filter_dict[k] = state_dict_loaded[oname]
                 else:
                     logger.warning(f"[oname] No dense model found dst, for {oname}")
@@ -612,10 +600,8 @@ class Saver:
                 filter_dict[k] = state_dict_loaded[k]
 
         if len(filter_dict) != 0:
-            logger.info("Load dense model")
-            missing, unexpected = self._model.load_state_dict(
-                filter_dict, strict=strict
-            )
+            logger.info(f"Load dense model from checkpoint {ckpt_dir}")
+            missing, unexpected = self._model.load_state_dict(filter_dict, strict=False)
             if len(missing) > 0:
                 logger.warning(f"Missing keys in dense model: {missing}")
             if len(unexpected) > 0:
@@ -666,9 +652,11 @@ class Saver:
                     logger.info(f"Load io state for dataset: {io_name}")
                     io.load_io_state(io_state[io_name])
                 else:
-                    logger.info(f"No io state found for dataset: {io_name}")
+                    logger.warning(f"No io state found for dataset: {io_name}")
         else:
-            logger.info("No need to load io state")
+            logger.info(
+                "Skip loading io_state because it is not in model bank config"
+            )
 
         extra_data = load_pt_file(ckpt_dir, "extra")
         if len(extra_data) == 0:
@@ -680,6 +668,7 @@ class Saver:
                 ExtraFields.prev_optim
             )
 
+        logger.info(f"load extra params from checkpoint {ckpt_dir}")
         for key, value in self._extra_save_dict.items():
             if key not in model_bank_conf:
                 logger.info(
@@ -688,32 +677,32 @@ class Saver:
                 continue
 
             if key not in extra_data:
-                logger.warning(f"No {key} found in {ckpt_dir} when load extra params")
+                logger.info(f"No {key} found in {ckpt_dir} when load extra params")
                 continue
 
             data = extra_data[key]
             if hasattr(value, "load_state_dict"):
-                if not hasattr(value, "named_optimizer"):
-                    logger.warning(
-                        f"Load dense optimizer from {ckpt_dir} may cause error, please upgrade to PyTorch>=2.6.0 and use named optimizer"
-                    )
-                    value.load_state_dict(data)
-                else:
-                    logger.info(
-                        f"Load dense optimizer from {ckpt_dir} using named optimizer"
-                    )
+                if hasattr(value, "named_optimizer"):
                     value.load_state_dict(data, **dense_optim_args)
-                    logger.info("dense optimizer param group info:")
+                    logger.warning("dense optimizer param group info:")
                     for pg in value.param_groups:
-                        logger.info(
+                        logger.warning(
                             json.dumps(
                                 {k: v for k, v in pg.items() if k != "params"}, indent=4
                             )
+                        )
+                else:
+                    value.load_state_dict(data)
+                    if isinstance(value, torch.optim.Optimizer):
+                        logger.warning(
+                            f"Load dense optimizer from {ckpt_dir} may cause error, please upgrade to PyTorch>=2.6.0 and use named optimizer"
                         )
             elif isinstance(value, torch.Tensor):
                 value.copy_(data)
             else:
                 value = data
+
+            logger.info(f"load {key} from ckpt {ckpt_dir}'s extra_data")
             self._extra_save_dict[key] = value
 
     def load(
@@ -746,7 +735,7 @@ class Saver:
                         ckpt_id = line.strip()
                         break
                 else:
-                    logger.info(f"Checkpoint not found in {ckpt_path}")
+                    logger.warning(f"Checkpoint not found in {ckpt_path}")
                     return
             logger.info(f"Load checkpoint from {ckpt_path}")
             ckpt_path = os.path.join(ckpt_path, ckpt_id)
@@ -756,8 +745,13 @@ class Saver:
         """
         convert valid model names to optimizer param names
         """
+        if optimizer is None:
+            logger.warning("No dense optimizer registered, return empty set")
+            return set()
+
         model_dict = dict(model.named_parameters())
         optim_dict = {}
+
         for group in optimizer.param_groups:
             if "param_names" not in group:
                 msg = ", ".join(
@@ -791,15 +785,14 @@ class Saver:
         }
         self._load_sparse_model(ckpt_path, sparse_model_bank)
 
-        strict = not next(iter(model_bank_conf.values())).get(MBC.IGNORE_ERROR, True)
         dense_model_bank = {
             k: v for k, v in model_bank_conf.items() if k in self._dense_names
         }
 
         valid_dense_names = self._convert_valid_names(
-            self._load_dense_model(ckpt_path, dense_model_bank, strict),
+            self._load_dense_model(ckpt_path, dense_model_bank),
             self._model,
-            self._extra_save_dict[ExtraFields.recis_dense_optim],
+            self._extra_save_dict.get(ExtraFields.recis_dense_optim, None),
         )
 
         load_map = {
@@ -807,6 +800,7 @@ class Saver:
             for k, v in model_bank_conf.items()
             if MBC.ONAME in v and k in self._dense_names
         }
+        strict = not next(iter(model_bank_conf.values())).get(MBC.IGNORE_ERROR, True)
         dense_optim_args = {
             "valid_names": valid_dense_names,
             "load_map": load_map,
@@ -828,19 +822,19 @@ class Saver:
 
     def _clear_hashtables_if_needed(self, var_config_dict: dict):
         """Clear hashtables for variables that require it."""
+        cleared = set()
         for var_name, var_config in var_config_dict.items():
             if var_config.get("hashtable_clear", False):
                 sparse_params = filter_out_sparse_param(self._model)
-                for ht_name, hashtable_obj in sparse_params.items():
-                    if (
-                        var_name.startswith(ht_name)
-                        or var_name.replace("@*", "") == ht_name
-                    ):
-                        if hasattr(hashtable_obj, "clear"):
-                            logger.info(
-                                f"Clearing hashtable: {ht_name} for variable: {var_name}"
-                            )
-                            hashtable_obj.clear(ht_name)
+                for hashtable_obj in sparse_params.values():
+                    for child_name in hashtable_obj.children_info().children():
+                        if (
+                            var_name.startswith(child_name)
+                            or var_name.replace("@*", "") == child_name
+                        ) and child_name not in cleared:
+                            logger.warning(f"Clearing hashtable {child_name}")
+                            hashtable_obj.clear(child_name)
+                            cleared.add(child_name)
 
     def _load_variables(self, model_bank: dict):
         for path, vars in model_bank.items():

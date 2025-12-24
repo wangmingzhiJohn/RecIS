@@ -5,10 +5,13 @@ import unittest
 
 import torch
 import torch.nn as nn
+import torch.testing._internal.common_utils as common
 
 from recis.framework.checkpoint_manager import ExtraFields, Saver, SaverOptions
 from recis.framework.filesystem import get_file_system
-from recis.nn.modules.hashtable import HashTable, filter_out_sparse_param, gen_slice
+from recis.nn.modules.embedding import EmbeddingOption
+from recis.nn.modules.embedding_engine import EmbeddingEngine
+from recis.nn.modules.hashtable import filter_out_sparse_param
 from recis.optim.sparse_adamw_tf import SparseAdamWTF
 from recis.serialize.checkpoint_reader import CheckpointReader
 from recis.utils.logger import Logger
@@ -22,12 +25,24 @@ class Model(torch.nn.Module):
         super().__init__()
         self.shard_idx = shard_idx
         self.shard_num = shard_num
-        self.table_1 = HashTable(
-            [1024], name="table_1", slice=gen_slice(shard_idx, shard_num)
-        )
-        self.table_2 = HashTable(
-            [1024], name="table_2", slice=gen_slice(shard_idx, shard_num)
-        )
+        emb_options = {
+            "table_1": EmbeddingOption(
+                embedding_dim=1024,
+                shared_name="table_1",
+                combiner="sum",
+                coalesced=True,
+                device=torch.device("cuda"),
+            ),
+            "table_2": EmbeddingOption(
+                embedding_dim=1024,
+                shared_name="table_2",
+                combiner="sum",
+                coalesced=True,
+                device=torch.device("cuda"),
+            ),
+        }
+
+        self.embedding_engine = EmbeddingEngine(emb_options)
 
         self.dense1 = nn.Sequential(
             nn.Linear(1024, 512),
@@ -38,10 +53,18 @@ class Model(torch.nn.Module):
             nn.Linear(512, 1),
         )
 
-    def forward(self, x):
-        return self.dense1(self.table_1(x) + self.table_2(x)) + self.dense2(
-            self.table_2(x)
+    def forward(self, x, y):
+        embedding_results = self.embedding_engine(
+            {
+                "table_1": x,
+                "table_2": y,
+            }
         )
+
+        table_1_emb = embedding_results["table_1"]
+        table_2_emb = embedding_results["table_2"]
+
+        return self.dense1(table_1_emb + table_2_emb) + self.dense2(table_2_emb)
 
 
 class DenseModel(torch.nn.Module):
@@ -61,6 +84,22 @@ class DenseModel(torch.nn.Module):
 
 
 class TestModelBank(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(common.find_free_port())
+        os.environ["RANK"] = "0"
+        os.environ["LOCAL_RANK"] = "0"
+        torch.distributed.init_process_group(
+            backend="nccl" if torch.cuda.is_available() else "gloo"
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
     def setUp(self):
         # 创建临时目录
         self.tmpdir = tempfile.mkdtemp()
@@ -73,13 +112,14 @@ class TestModelBank(unittest.TestCase):
         print("in init", self.tmpdir)
 
         saver_option = SaverOptions(
-            self.model,
-            self.sparse_optim,
-            self.tmpdir,
-            None,
-            20,
-            1,
-            None,
+            model=self.model,
+            sparse_optim=self.sparse_optim,
+            output_dir=self.tmpdir,
+            model_bank=None,
+            max_keep=20,
+            concurrency=1,
+            params_not_save=None,
+            save_filter_fn=None,
         )
         self.epoch = torch.scalar_tensor(0, dtype=torch.int64).cuda()
         self.global_step = torch.scalar_tensor(0, dtype=torch.int64).cuda()
@@ -103,8 +143,10 @@ class TestModelBank(unittest.TestCase):
 
             self.sparse_optim.zero_grad()
             self.dense_optim.zero_grad()
-            ids = torch.arange(100)
-            emb = self.model(ids)
+            emb = self.model(
+                torch.arange(16, device="cuda").unsqueeze(1),
+                torch.arange(16, device="cuda").unsqueeze(1),
+            )
             loss = torch.sum(emb)
             loss.backward()
             self.sparse_optim.step()
@@ -123,7 +165,9 @@ class TestModelBank(unittest.TestCase):
                     oname = name.replace("dense1", "densex")
                 elif "dense2" in name:
                     oname = name.replace("dense2", "densey")
-                self.assertTrue(torch.allclose(state_dict[oname], param))
+                self.assertTrue(
+                    torch.allclose(state_dict[oname].to("cuda"), param.to("cuda"))
+                )
 
     def _check_dense_optim(self, path):
         fs = get_file_system(os.path.join(path, "extra.pt"))
@@ -141,8 +185,8 @@ class TestModelBank(unittest.TestCase):
             for key, val in value.items():
                 self.assertTrue(
                     torch.allclose(
-                        val,
-                        tmp_state_dict["state"][cnt][key],
+                        val.to("cuda"),
+                        tmp_state_dict["state"][cnt][key].to("cuda"),
                     )
                 )
 
@@ -160,8 +204,8 @@ class TestModelBank(unittest.TestCase):
         ]
         for name in tensor_names:
             self.assertEqual(
-                reader.read_tensor(name),
-                self.sparse_optim.state_dict()[name],
+                reader.read_tensor(name).to("cuda"),
+                self.sparse_optim.state_dict()[name].to("cuda"),
             )
 
     def _check_sparse_oname(self, path, src_tables=None, dst_tables=None):
@@ -171,34 +215,47 @@ class TestModelBank(unittest.TestCase):
             dst_tables = []
         reader = CheckpointReader(path)
         for src_table, dst_table in zip(src_tables, dst_tables):
-            tmp_model = getattr(self.model, dst_table)
-            _, index = tmp_model.ids_map()
+            ht_name = self.model.embedding_engine._fea_to_ht[dst_table]
+            dynamic_emb = self.model.embedding_engine._ht[ht_name]
+            hashtable = dynamic_emb._hashtable
+
+            hashtable_ids, index = hashtable.ids_map(child=dst_table)
+
+            id_mask = (1 << 52) - 1
+            decode_ids = torch.bitwise_and(hashtable_ids, id_mask)
+
             self.assertTrue(
                 torch.allclose(
-                    reader.read_tensor(f"{src_table}@id"),
-                    tmp_model.ids(),
+                    torch.sort(reader.read_tensor(f"{src_table}@id").to("cuda"))[0],
+                    torch.sort(decode_ids.to("cuda"))[0],
                 )
             )
             self.assertTrue(
                 torch.allclose(
-                    reader.read_tensor(f"{src_table}@embedding"),
-                    tmp_model.embeddings()[index],
+                    reader.read_tensor(f"{src_table}@embedding").to("cuda"),
+                    hashtable.embeddings_map(child=dst_table)[1].to("cuda"),
                 )
             )
             self.assertTrue(
                 torch.allclose(
-                    reader.read_tensor(f"{src_table}@sparse_adamw_tf_exp_avg"),
-                    tmp_model._hashtable_impl.slot_group()
+                    reader.read_tensor(f"{src_table}@sparse_adamw_tf_exp_avg").to(
+                        "cuda"
+                    ),
+                    hashtable._hashtable_impl.slot_group()
                     .slot_by_name("sparse_adamw_tf_exp_avg")
-                    .value()[index],
+                    .value()[index]
+                    .to("cuda"),
                 )
             )
             self.assertTrue(
                 torch.allclose(
-                    reader.read_tensor(f"{src_table}@sparse_adamw_tf_exp_avg_sq"),
-                    tmp_model._hashtable_impl.slot_group()
+                    reader.read_tensor(f"{src_table}@sparse_adamw_tf_exp_avg_sq").to(
+                        "cuda"
+                    ),
+                    hashtable._hashtable_impl.slot_group()
                     .slot_by_name("sparse_adamw_tf_exp_avg_sq")
-                    .value()[index],
+                    .value()[index]
+                    .to("cuda"),
                 )
             )
 
@@ -213,20 +270,24 @@ class TestModelBank(unittest.TestCase):
     ):
         reader = CheckpointReader(path)
         for table_name in table_names:
-            tmp_model = getattr(self.model, table_name)
+            ht_name = self.model.embedding_engine._fea_to_ht[table_name]
+            dynamic_emb = self.model.embedding_engine._ht[ht_name]
+            hashtable = dynamic_emb._hashtable
+            hashtable_ids, index = hashtable.ids_map(child=table_name)
+            id_mask = (1 << 52) - 1
+            decode_ids = torch.bitwise_and(hashtable_ids, id_mask)
             self.assertTrue(
                 torch.allclose(
-                    reader.read_tensor(f"{table_name}@id"),
-                    tmp_model.ids(),
+                    torch.sort(reader.read_tensor(f"{table_name}@id").to("cuda"))[0],
+                    torch.sort(decode_ids.to("cuda"))[0],
                 )
             )
 
-            _, index = tmp_model.ids_map()
-
+            _, embeddings = hashtable.embeddings_map(child=table_name)
             self.assertTrue(
                 torch.allclose(
-                    reader.read_tensor(f"{table_name}@embedding"),
-                    tmp_model.embeddings()[index],
+                    reader.read_tensor(f"{table_name}@embedding").to("cuda"),
+                    embeddings.to("cuda"),
                 )
             )
 
@@ -235,18 +296,24 @@ class TestModelBank(unittest.TestCase):
                     continue
                 self.assertTrue(
                     torch.allclose(
-                        reader.read_tensor(f"{slot_name}@sparse_adamw_tf_exp_avg"),
-                        tmp_model._hashtable_impl.slot_group()
+                        reader.read_tensor(f"{slot_name}@sparse_adamw_tf_exp_avg").to(
+                            "cuda"
+                        ),
+                        hashtable._hashtable_impl.slot_group()
                         .slot_by_name("sparse_adamw_tf_exp_avg")
-                        .value()[index],
+                        .value()[index]
+                        .to("cuda"),
                     )
                 )
                 self.assertTrue(
                     torch.allclose(
-                        reader.read_tensor(f"{slot_name}@sparse_adamw_tf_exp_avg_sq"),
-                        tmp_model._hashtable_impl.slot_group()
+                        reader.read_tensor(
+                            f"{slot_name}@sparse_adamw_tf_exp_avg_sq"
+                        ).to("cuda"),
+                        hashtable._hashtable_impl.slot_group()
                         .slot_by_name("sparse_adamw_tf_exp_avg_sq")
-                        .value()[index],
+                        .value()[index]
+                        .to("cuda"),
                     )
                 )
 
@@ -257,7 +324,9 @@ class TestModelBank(unittest.TestCase):
             state_dict = torch.load(f, weights_only=False)
         for name, param in self.model.named_parameters():
             if name.startswith("dense"):
-                self.assertTrue(torch.allclose(state_dict[name], param))
+                self.assertTrue(
+                    torch.allclose(state_dict[name].to("cuda"), param.to("cuda"))
+                )
 
     def _run_dense_oname_model(self, path):
         if os.path.exists(os.path.join(path, "model.pt")):
@@ -267,7 +336,7 @@ class TestModelBank(unittest.TestCase):
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
         for _ in range(10):
             optimizer.zero_grad()
-            x = torch.randn(100, 1024).to("cuda")
+            x = torch.randn((16, 1024), device="cuda")
             y = model(x)
             loss = torch.sum(y)
             loss.backward()
@@ -398,8 +467,10 @@ class TestModelBank(unittest.TestCase):
                 "load": ["table_1*", "table_2*", "dense*"],
                 "exclude": ["io_state"],
                 "oname": [
-                    {"table_1*": "table_2*"},
-                    {"table_2*": "table_1*"},
+                    {"table_1@id": "table_2@id"},
+                    {"table_1@embedding": "table_2@embedding"},
+                    {"table_2@id": "table_1@id"},
+                    {"table_2@embedding": "table_1@embedding"},
                     {"dense1*": "densex*"},
                     {"dense2*": "densey*"},
                 ],
