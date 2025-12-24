@@ -92,6 +92,7 @@ class TrainingArguments:
     ckpt_save_arg: Optional[CheckpointSaveArguments] = None
     ckpt_load_arg: Optional[CheckpointLoadArguments] = None
     mixed_precision: Optional[str] = None
+    window_iter: Optional[int] = None
 
 
 class Trainer:
@@ -438,8 +439,14 @@ class Trainer:
         return bool(self.stop_state.item())
 
     def _train_loop_by_window(self, max_steps=None, epoch=1):
+        window_iter = 0
         self.model.train()
         while True:
+            if (
+                self.args.window_iter is not None
+                and window_iter >= self.args.window_iter
+            ):
+                break
             iterator = self.get_new_window_iter(self.train_dataset)
             need_break = iterator is None
             need_break = self.sync_exit_flag(need_break)
@@ -450,10 +457,17 @@ class Trainer:
             self._train_loop_internal(iterator, max_steps, epoch)
             for hook in self.hooks:
                 hook.after_window(is_train=True)
+            window_iter += 1
 
     def _eval_loop_by_window(self, max_steps=None):
+        window_iter = 0
         self.model.eval()
         while True:
+            if (
+                self.args.window_iter is not None
+                and window_iter >= self.args.window_iter
+            ):
+                break
             iterator = self.get_new_window_iter(self.eval_dataset)
             need_break = iterator is None
             need_break = self.sync_exit_flag(need_break)
@@ -464,9 +478,16 @@ class Trainer:
             self._eval_loop_internal(iterator, max_steps)
             for hook in self.hooks:
                 hook.after_window(is_train=False)
+            window_iter += 1
 
     def _train_eval_loop_by_window(self, train_steps=None, eval_steps=None, epoch=1):
+        window_iter = 0
         while True:
+            if (
+                self.args.window_iter is not None
+                and window_iter >= self.args.window_iter
+            ):
+                break
             self.model.train()
             train_iterator = self.get_new_window_iter(self.train_dataset)
             train_need_break = train_iterator is None
@@ -490,6 +511,7 @@ class Trainer:
             self._eval_loop_internal(eval_iterator, eval_steps)
             for hook in self.hooks:
                 hook.after_window(is_train=True)
+            window_iter += 1
 
     def _train_loop(self, max_steps=None, epoch=1):
         self.model.train()
