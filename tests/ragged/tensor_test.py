@@ -32,7 +32,7 @@ class TestRaggedTensor:
         assert torch.equal(ragged.values(), dense.view(-1))
         assert torch.equal(
             ragged.offsets()[0],
-            torch.arange(0, rows + 1, cols, device="cpu").to(torch.int),
+            torch.arange(0, (rows + 1) * cols, cols, device="cpu").to(torch.int),
         )
 
     def test_to_dense(self):

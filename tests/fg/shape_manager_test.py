@@ -77,7 +77,7 @@ class TestShapeManeger(unittest.TestCase):
             self.shape_manager_already_hash,
         ]:
             self.assertTrue(sm.get_block_shape("item_columns") == [-1, 16])
-            self.assertTrue(sm.get_block_shape("user_columns") == [-1, 8])
+            self.assertTrue(sm.get_block_shape("user_columns") == [-1, 40])
             self.assertTrue(sm.get_block_shape("attention_user") == [-1, 8])
             self.assertTrue(sm.get_block_shape("predict_features") == [-1, 2])
             self.assertTrue(
