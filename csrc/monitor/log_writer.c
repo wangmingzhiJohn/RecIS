@@ -213,7 +213,8 @@ static char *__recis_monitor_relative_path_calc(const char *base_dir,
     common++;
   }
   // Build relative path
-  char rel[size] = {0};
+  char rel[size];
+  memset(rel, 0, size);
   for (int i = common; i < nb; i++) {
     strcat(rel, "../");
   }
@@ -242,8 +243,8 @@ static int __recis_monitor_safe_rotate_file(RECIS_MONITOR_LOG_WRITER_T *lw) {
   // __LINE__, new_fullpath);
   lw->fp = fopen(new_fullpath, "a");
   if (!lw->fp) {
-    fprintf(stderr, "[ERROR] [%s:%d] fopen rotate create fail\n", __FILE__,
-            __LINE__);
+    fprintf(stderr, "[ERROR] [%s:%d] fopen rotate create fail: %s\n", __FILE__,
+            __LINE__, new_fullpath);
     if (old_fp) __recis_monitor_funlock(old_fp);
     return -1;
   }
@@ -257,6 +258,10 @@ static int __recis_monitor_safe_rotate_file(RECIS_MONITOR_LOG_WRITER_T *lw) {
   char *link_rel =
       __recis_monitor_relative_path_calc(relative_dir, new_fullpath, 512);
   if (!link_rel) {
+    fprintf(stderr, "[ERROR] [%s:%d] calc relative_path fail: %s\n", __FILE__,
+            __LINE__, new_fullpath);
+    if (old_fp) __recis_monitor_funlock(old_fp);
+    __recis_monitor_funlock(lw->fp);
     return -1;
   }
 
@@ -264,13 +269,18 @@ static int __recis_monitor_safe_rotate_file(RECIS_MONITOR_LOG_WRITER_T *lw) {
   int ret = symlink(link_rel, lw->soft_path);  // relink new symbol link
   free(link_rel);
   if (ret != 0) {
+    fprintf(stderr, "[ERROR] [%s:%d] symlink new link fail: %s\n", __FILE__,
+            __LINE__, new_fullpath);
+    if (old_fp) __recis_monitor_funlock(old_fp);
+    __recis_monitor_funlock(lw->fp);
     return -1;
   }
 
   // del old-fashioned rotated files
   __recis_monitor_unlink_olds(lw->soft_path);
   if (old_fp) {
-    fflush(old_fp), fclose(old_fp);  // auto funlock in fclose
+    __recis_monitor_funlock(old_fp);
+    fclose(old_fp);  // auto flush in fclose
   }
   __recis_monitor_funlock(lw->fp);
   return 0;
