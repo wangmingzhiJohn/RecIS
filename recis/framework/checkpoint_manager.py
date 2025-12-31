@@ -654,9 +654,7 @@ class Saver:
                 else:
                     logger.warning(f"No io state found for dataset: {io_name}")
         else:
-            logger.info(
-                "Skip loading io_state because it is not in model bank config"
-            )
+            logger.info("Skip loading io_state because it is not in model bank config")
 
         extra_data = load_pt_file(ckpt_dir, "extra")
         if len(extra_data) == 0:

@@ -87,9 +87,12 @@ class LoggerHook(Hook):
             - Additional metrics as provided in the metrics dictionary
         """
         if self.steps % self.log_step == 0:
+            MODE = "MODE.TRAIN" if is_train else "MODE.EVAL"
             spend_time = time.time() - self.start_time
             qps = self.log_step / spend_time
-            log_str = f"<gstep={global_step}> <lstep={self.steps}> <qps={qps:.4f}>"
+            log_str = (
+                f"<{MODE}> <gstep={global_step}> <lstep={self.steps}> <qps={qps:.4f}>"
+            )
             log_str += self.format_metrics(metrics)
             self.logger.info(log_str)
             self.start_time = time.time()

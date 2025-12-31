@@ -202,7 +202,9 @@ class Trainer:
         self.data_to_cuda = data_to_cuda
         self.mixed_precision = args.mixed_precision
         if self.mixed_precision is not None:
-            assert self.mixed_precision in ["bf16", "fp16"], "mixed_precision must be 'bf16' or 'fp16'"
+            assert self.mixed_precision in ["bf16", "fp16"], (
+                "mixed_precision must be 'bf16' or 'fp16'"
+            )
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         init_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=1800))
         self.accelerator = Accelerator(
@@ -488,7 +490,6 @@ class Trainer:
                 and window_iter >= self.args.window_iter
             ):
                 break
-            self.model.train()
             train_iterator = self.get_new_window_iter(self.train_dataset)
             train_need_break = train_iterator is None
             train_need_break = self.sync_exit_flag(train_need_break)
@@ -507,7 +508,9 @@ class Trainer:
                 break
             for hook in self.hooks:
                 hook.before_window(is_train=True)
+            self.model.train()
             self._train_loop_internal(train_iterator, train_steps, epoch)
+            self.model.eval()
             self._eval_loop_internal(eval_iterator, eval_steps)
             for hook in self.hooks:
                 hook.after_window(is_train=True)

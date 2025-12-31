@@ -9,9 +9,15 @@ import torch
 from safetensors.torch import load_file
 
 from recis.framework.filesystem import get_file_system
+from recis.info import is_internal_enabled
 from recis.serialize.checkpoint_reader import CheckpointReader
 from recis.utils.logger import Logger
-from recis.utils.mos import Mos
+
+
+if is_internal_enabled() and not os.environ.get("BUILD_DOCUMENT", None) == "1":
+    from recis.utils.mos import Mos
+else:
+    Mos = None
 
 
 logger = Logger(__name__)
